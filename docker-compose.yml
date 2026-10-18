@@ -1,0 +1,53 @@
+services:
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-invoice_reconciliation}
+      MYSQL_USER: ${MYSQL_USER:-invoice_app}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-invoice_app_password}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_dev_password}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  app:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        INSTALL_OCR: ${INSTALL_OCR:-0}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_NAME: Invoice Reconciliation MVP
+      SECRET_KEY: ${SECRET_KEY:-replace-this-development-secret-before-sharing}
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-invoice_app}:${MYSQL_PASSWORD:-invoice_app_password}@db:3306/${MYSQL_DATABASE:-invoice_reconciliation}?charset=utf8mb4
+      UPLOAD_DIR: /app/backend/data/uploads
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@gmail.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      ACCOUNTANT_EMAIL: ${ACCOUNTANT_EMAIL:-ketoan@gmail.com}
+      ACCOUNTANT_PASSWORD: ${ACCOUNTANT_PASSWORD:-admin}
+      CHIEF_ACCOUNTANT_EMAIL: ${CHIEF_ACCOUNTANT_EMAIL:-ketoantruong@gmail.com}
+      CHIEF_ACCOUNTANT_PASSWORD: ${CHIEF_ACCOUNTANT_PASSWORD:-admin}
+      OCR_DEVICE: ${OCR_DEVICE:-cpu}
+      OCR_MIN_CONFIDENCE: ${OCR_MIN_CONFIDENCE:-0.80}
+      CURRENCY_TOLERANCE: ${CURRENCY_TOLERANCE:-1}
+      ITEM_SIMILARITY_THRESHOLD: ${ITEM_SIMILARITY_THRESHOLD:-90}
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    volumes:
+      - invoice_uploads:/app/backend/data/uploads
+      - ocr_models:/home/appuser/.paddlex
+
+volumes:
+  mysql_data:
+  invoice_uploads:
+  ocr_models:

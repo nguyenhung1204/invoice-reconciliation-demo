@@ -1,0 +1,12 @@
+.env
+.venv/
+.venv-demo/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.zip
+*.log
+backend/data/*
+!backend/data/.gitkeep
+data/*
+!data/.gitkeep
