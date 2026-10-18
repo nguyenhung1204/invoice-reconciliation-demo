@@ -13,7 +13,7 @@ Nếu không dùng file `.bat`, mở PowerShell trong thư mục dự án và ch
 
 ```powershell
 Copy-Item .env.docker.example .env
-docker compose up --build -d
+docker compose up --build --wait -d
 ```
 
 Xem trạng thái bằng `docker compose ps`; nếu Docker chưa khởi động, mở Docker Desktop rồi chạy lại. Dừng demo bằng `docker compose down`. Dữ liệu MySQL và hóa đơn đã tải vẫn được giữ trong Docker volumes. Mỗi máy có địa chỉ `localhost:8000` riêng; liên kết GitHub chỉ chứa mã nguồn, không phải trang demo chạy sẵn trên Internet.
@@ -38,7 +38,7 @@ Requirements: Docker Desktop installed and running.
 ```powershell
 Copy-Item .env.docker.example .env
 # For a private or shared environment, edit .env and replace the sample passwords and SECRET_KEY.
-docker compose up --build -d
+docker compose up --build --wait -d
 docker compose ps
 ```
 

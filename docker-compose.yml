@@ -43,6 +43,12 @@ services:
       ITEM_SIMILARITY_THRESHOLD: ${ITEM_SIMILARITY_THRESHOLD:-90}
     ports:
       - "${APP_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
     volumes:
       - invoice_uploads:/app/backend/data/uploads
       - ocr_models:/home/appuser/.paddlex

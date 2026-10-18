@@ -19,7 +19,7 @@ if errorlevel 1 (
 if not exist ".env" copy ".env.docker.example" ".env" >nul
 
 echo Building and starting the invoice demo. The first run can take several minutes...
-docker compose up --build -d
+docker compose up --build --wait -d
 if errorlevel 1 (
     echo Startup failed. Check the error above and Docker Desktop, then try again.
     pause
