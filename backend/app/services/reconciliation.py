@@ -1,7 +1,7 @@
 from rapidfuzz.fuzz import ratio
 
-from app.core.config import settings
 from app.services.normalization import normalize_text
+from app.services.reconciliation_settings import get_reconciliation_settings
 
 
 def _number(value):
@@ -12,8 +12,9 @@ def _number(value):
 
 
 def reconcile(invoice, purchase_order=None, goods_receipt=None, amount_tolerance=None, item_threshold=None):
-    amount_tolerance = settings.currency_tolerance if amount_tolerance is None else amount_tolerance
-    item_threshold = settings.item_similarity_threshold if item_threshold is None else item_threshold
+    reconciliation_settings = get_reconciliation_settings()
+    amount_tolerance = reconciliation_settings["currency_tolerance"] if amount_tolerance is None else amount_tolerance
+    item_threshold = reconciliation_settings["item_similarity_threshold"] if item_threshold is None else item_threshold
     warnings = []
     if not invoice.seller_tax_code:
         warnings.append({"code": "MISSING_SELLER_TAX", "message": "Thiếu mã số thuế bên bán"})

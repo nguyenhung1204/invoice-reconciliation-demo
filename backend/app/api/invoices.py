@@ -14,6 +14,7 @@ from app.models import AuditEvent, GoodsReceipt, Invoice, PurchaseOrder, User
 from app.services.normalization import extract_fields
 from app.services.ocr import OCRUnavailable, recognize_file
 from app.services.reconciliation import reconcile
+from app.services.reconciliation_settings import get_reconciliation_settings
 
 router = APIRouter(prefix="/invoices", tags=["Modules 3–5 · Intake, OCR & HITL"])
 ALLOWED = {"application/pdf", "image/jpeg", "image/png"}
@@ -77,7 +78,7 @@ async def upload_invoice(file: UploadFile = File(...), db: Session = Depends(get
         fields = extract_fields(text)
         for key in ("seller_tax_code", "buyer_tax_code", "invoice_date", "total_amount", "items"):
             setattr(row, key, fields[key])
-        status = "needs_review" if confidence is None or confidence < settings.ocr_min_confidence else "ocr_done"
+        status = "needs_review" if confidence is None or confidence < get_reconciliation_settings()["ocr_confidence_min"] else "ocr_done"
         if not text.strip():
             warnings.append({"code": "OCR_EMPTY", "message": "OCR không đọc được chữ; kiểm tra file hoặc chạy nhận dạng lại."})
     except OCRUnavailable as exc:
@@ -118,7 +119,7 @@ async def retry_ocr(invoice_id: int, db: Session = Depends(get_db), user: User =
         fields = extract_fields(row.ocr_text)
         for key in ("seller_tax_code", "buyer_tax_code", "invoice_date", "total_amount", "items"):
             setattr(row, key, fields[key])
-        row.status = "needs_review" if row.ocr_confidence is None or row.ocr_confidence < settings.ocr_min_confidence else "ocr_done"
+        row.status = "needs_review" if row.ocr_confidence is None or row.ocr_confidence < get_reconciliation_settings()["ocr_confidence_min"] else "ocr_done"
         if not row.ocr_text.strip():
             warnings.append({"code": "OCR_EMPTY", "message": "OCR không đọc được chữ; kiểm tra chất lượng file."})
     except OCRUnavailable as exc:

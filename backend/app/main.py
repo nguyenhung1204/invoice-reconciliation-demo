@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.core.database import Base, SessionLocal, engine
 from app.core.security import hash_password
 from app.models import User
-from app.services.scheduler import scan_inbox_folder
+from app.services.scheduler import generate_daily_reconciliation_report, scan_inbox_folder
 
 scheduler = BackgroundScheduler(daemon=True)
 
@@ -41,9 +41,11 @@ def initialize():
 async def lifespan(_: FastAPI):
     initialize()
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
+    scheduler.add_job(generate_daily_reconciliation_report, "cron", hour=1, minute=0,
+                      id="daily-reconciliation-report", replace_existing=True)
     if settings.inbox_scan_dir:
         scheduler.add_job(scan_inbox_folder, "interval", minutes=1, id="inbox-folder-scan", replace_existing=True)
-        scheduler.start()
+    scheduler.start()
     yield
     if scheduler.running:
         scheduler.shutdown(wait=False)

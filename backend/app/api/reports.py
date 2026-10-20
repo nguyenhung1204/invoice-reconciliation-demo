@@ -3,6 +3,7 @@ import io
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -13,10 +14,36 @@ from app.models import AuditEvent, Invoice, User
 from app.core.config import settings
 from app.core.dependencies import require_roles
 from app.models import Supplier
-from app.services.scheduler import scan_inbox_folder
+from app.services.scheduler import generate_daily_reconciliation_report, scan_inbox_folder
+from app.services.reconciliation_settings import get_reconciliation_settings, save_reconciliation_settings
 from pathlib import Path
 
 router = APIRouter(prefix="/reports", tags=["Module 6 · Reporting & Monitor"])
+
+
+class ReconciliationSettingsIn(BaseModel):
+    currency_tolerance: float = Field(ge=0)
+    item_similarity_threshold: int = Field(ge=0, le=100)
+    ocr_confidence_min: float = Field(ge=0, le=1)
+
+
+@router.get("/settings")
+def reconciliation_settings(_: User = Depends(current_user)):
+    return get_reconciliation_settings()
+
+
+@router.put("/settings")
+def update_reconciliation_settings(body: ReconciliationSettingsIn,
+                                   _: User = Depends(require_roles("chief_accountant", "admin"))):
+    return save_reconciliation_settings(body.model_dump())
+
+
+@router.get("/reconciliation.csv")
+def reconciliation_csv(_: User = Depends(current_user)):
+    from fastapi.responses import FileResponse
+    report_path = generate_daily_reconciliation_report()
+    return FileResponse(report_path, media_type="text/csv; charset=utf-8",
+                        filename=report_path.name)
 
 
 @router.get("/dashboard")

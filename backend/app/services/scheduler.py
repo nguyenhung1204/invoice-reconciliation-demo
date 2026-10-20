@@ -1,9 +1,13 @@
 from hashlib import sha256
+import csv
+from datetime import date
 from pathlib import Path
 
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models import AuditEvent, Invoice
+
+REPORT_DIR = Path(__file__).resolve().parents[2] / "data" / "reports"
 
 
 def scan_inbox_folder() -> int:
@@ -35,3 +39,22 @@ def scan_inbox_folder() -> int:
             inserted += 1
         db.commit()
     return inserted
+
+
+def generate_daily_reconciliation_report(report_date: date | None = None) -> Path:
+    """Write a dated CSV snapshot of invoice reconciliation outcomes."""
+    report_date = report_date or date.today()
+    REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    report_path = REPORT_DIR / f"reconciliation-{report_date.isoformat()}.csv"
+    with SessionLocal() as db, report_path.open("w", encoding="utf-8-sig", newline="") as target:
+        writer = csv.writer(target)
+        writer.writerow(["invoice_id", "file_name", "invoice_number", "invoice_date", "seller_tax_code",
+                         "total_amount", "po_number", "status", "warning_codes", "warning_messages", "created_at"])
+        for row in db.query(Invoice).order_by(Invoice.created_at.asc()):
+            warnings = row.warnings or []
+            writer.writerow([row.id, row.original_name, row.invoice_number, row.invoice_date,
+                             row.seller_tax_code, row.total_amount, row.po_number, row.status,
+                             ";".join(w.get("code", "") for w in warnings),
+                             ";".join(w.get("message", "") for w in warnings),
+                             row.created_at.isoformat() if row.created_at else ""])
+    return report_path
