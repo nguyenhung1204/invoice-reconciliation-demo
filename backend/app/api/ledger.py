@@ -2,12 +2,12 @@ import csv
 import io
 import json
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import current_user, require_roles
-from app.models import AuditEvent, GoodsReceipt, PurchaseOrder, Supplier, User
+from app.models import AuditEvent, GoodsReceipt, Invoice, PurchaseOrder, Supplier, User
 
 router = APIRouter(prefix="/ledger", tags=["Module 2 · PO & Ledger"])
 
@@ -31,6 +31,25 @@ class GRIn(BaseModel):
     lines: list[dict] = []
 
 
+class POUpdate(BaseModel):
+    po_number: str | None = None
+    supplier_tax_code: str | None = None
+    total_amount: float | None = Field(default=None, ge=0)
+    status: str | None = None
+    lines: list[dict] | None = None
+
+
+class GRUpdate(BaseModel):
+    receipt_number: str | None = None
+    po_number: str | None = None
+    lines: list[dict] | None = None
+
+
+def record_audit(db, user, action, entity_type, entity_id, detail=""):
+    db.add(AuditEvent(actor_email=user.email, action=action, entity_type=entity_type,
+                      entity_id=str(entity_id), detail=detail))
+
+
 @router.get("/suppliers")
 def suppliers(db: Session = Depends(get_db), _: User = Depends(current_user)):
     return [{"id": x.id, "tax_code": x.tax_code, "name": x.name, "email": x.email} for x in db.query(Supplier).order_by(Supplier.name)]
@@ -41,7 +60,7 @@ def add_supplier(body: SupplierIn, db: Session = Depends(get_db), _: User = Depe
     if db.query(Supplier).filter(Supplier.tax_code == body.tax_code).first():
         raise HTTPException(409, "Mã số thuế nhà cung cấp đã tồn tại")
     row = Supplier(**body.model_dump()); db.add(row); db.flush()
-    db.add(AuditEvent(actor_email=_.email, action="supplier.create", entity_type="supplier", entity_id=str(row.id), detail=row.name))
+    record_audit(db, _, "supplier.create", "supplier", row.id, row.name)
     db.commit(); db.refresh(row)
     return {"id": row.id, **body.model_dump()}
 
@@ -58,9 +77,39 @@ def add_purchase_order(body: POIn, db: Session = Depends(get_db), _: User = Depe
     if db.query(PurchaseOrder).filter(PurchaseOrder.po_number == body.po_number).first():
         raise HTTPException(409, "Số PO đã tồn tại")
     row = PurchaseOrder(**body.model_dump()); db.add(row); db.flush()
-    db.add(AuditEvent(actor_email=_.email, action="purchase_order.create", entity_type="purchase_order", entity_id=str(row.id), detail=row.po_number))
+    record_audit(db, _, "purchase_order.create", "purchase_order", row.id, row.po_number)
     db.commit(); db.refresh(row)
     return {"id": row.id, **body.model_dump(), "status": row.status}
+
+
+@router.patch("/purchase-orders/{po_id}")
+def update_purchase_order(po_id: int, body: POUpdate, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    row = db.get(PurchaseOrder, po_id)
+    if not row:
+        raise HTTPException(404, "Không tìm thấy PO")
+    values = body.model_dump(exclude_unset=True)
+    if not values or any(value is None for value in values.values()):
+        raise HTTPException(422, "Cần cung cấp các giá trị cập nhật hợp lệ")
+    if "po_number" in values and db.query(PurchaseOrder).filter(PurchaseOrder.po_number == values["po_number"], PurchaseOrder.id != po_id).first():
+        raise HTTPException(409, "Số PO đã tồn tại")
+    for key, value in values.items():
+        setattr(row, key, value)
+    record_audit(db, user, "purchase_order.update", "purchase_order", row.id, ",".join(sorted(values)))
+    db.commit(); db.refresh(row)
+    return {"id": row.id, "po_number": row.po_number, "supplier_tax_code": row.supplier_tax_code,
+            "total_amount": row.total_amount, "status": row.status, "lines": row.lines or []}
+
+
+@router.delete("/purchase-orders/{po_id}")
+def delete_purchase_order(po_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    row = db.get(PurchaseOrder, po_id)
+    if not row:
+        raise HTTPException(404, "Không tìm thấy PO")
+    if db.query(GoodsReceipt).filter_by(po_number=row.po_number).first() or db.query(Invoice).filter_by(po_number=row.po_number).first():
+        raise HTTPException(409, "Không thể xóa PO đang được phiếu nhập hoặc hóa đơn tham chiếu")
+    record_audit(db, user, "purchase_order.delete", "purchase_order", row.id, row.po_number)
+    db.delete(row); db.commit()
+    return {"message": "Đã xóa PO"}
 
 
 @router.get("/goods-receipts")
@@ -76,9 +125,39 @@ def add_goods_receipt(body: GRIn, db: Session = Depends(get_db), _: User = Depen
     if db.query(GoodsReceipt).filter(GoodsReceipt.receipt_number == body.receipt_number).first():
         raise HTTPException(409, "Số phiếu nhập đã tồn tại")
     row = GoodsReceipt(**body.model_dump()); db.add(row); db.flush()
-    db.add(AuditEvent(actor_email=_.email, action="goods_receipt.create", entity_type="goods_receipt", entity_id=str(row.id), detail=row.receipt_number))
+    record_audit(db, _, "goods_receipt.create", "goods_receipt", row.id, row.receipt_number)
     db.commit(); db.refresh(row)
     return {"id": row.id, **body.model_dump()}
+
+
+@router.patch("/goods-receipts/{receipt_id}")
+def update_goods_receipt(receipt_id: int, body: GRUpdate, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    row = db.get(GoodsReceipt, receipt_id)
+    if not row:
+        raise HTTPException(404, "Không tìm thấy phiếu nhập")
+    values = body.model_dump(exclude_unset=True)
+    if not values or any(value is None for value in values.values()):
+        raise HTTPException(422, "Cần cung cấp các giá trị cập nhật hợp lệ")
+    if "po_number" in values and not db.query(PurchaseOrder).filter_by(po_number=values["po_number"]).first():
+        raise HTTPException(404, "Không tìm thấy PO")
+    if "receipt_number" in values and db.query(GoodsReceipt).filter(GoodsReceipt.receipt_number == values["receipt_number"], GoodsReceipt.id != receipt_id).first():
+        raise HTTPException(409, "Số phiếu nhập đã tồn tại")
+    for key, value in values.items():
+        setattr(row, key, value)
+    record_audit(db, user, "goods_receipt.update", "goods_receipt", row.id, ",".join(sorted(values)))
+    db.commit(); db.refresh(row)
+    return {"id": row.id, "receipt_number": row.receipt_number, "po_number": row.po_number,
+            "lines": row.lines or [], "received_at": row.received_at.isoformat()}
+
+
+@router.delete("/goods-receipts/{receipt_id}")
+def delete_goods_receipt(receipt_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    row = db.get(GoodsReceipt, receipt_id)
+    if not row:
+        raise HTTPException(404, "Không tìm thấy phiếu nhập")
+    record_audit(db, user, "goods_receipt.delete", "goods_receipt", row.id, row.receipt_number)
+    db.delete(row); db.commit()
+    return {"message": "Đã xóa phiếu nhập"}
 
 
 @router.post("/import/{kind}")
@@ -123,8 +202,7 @@ async def import_ledger(kind: str, file: UploadFile = File(...), db: Session = D
             created += 1
         except (TypeError, ValueError, json.JSONDecodeError):
             skipped += 1
-    db.commit()
-    db.add(AuditEvent(actor_email=user.email, action="ledger.import", entity_type=kind, entity_id="bulk", detail=f"created={created};skipped={skipped}"))
+    record_audit(db, user, "ledger.import", kind, "bulk", f"created={created};skipped={skipped}")
     db.commit()
     return {"created": created, "skipped": skipped, "total_rows": len(rows)}
 

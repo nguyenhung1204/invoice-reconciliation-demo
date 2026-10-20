@@ -138,6 +138,26 @@ def get_invoice(invoice_id: int, db: Session = Depends(get_db), _: User = Depend
     return serialize(row)
 
 
+@router.delete("/{invoice_id}")
+def delete_invoice(invoice_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles("chief_accountant", "admin"))):
+    row = db.get(Invoice, invoice_id)
+    if not row:
+        raise HTTPException(404, "Không tìm thấy hóa đơn")
+    if row.status == "approved" and user.role != "admin":
+        raise HTTPException(403, "Chỉ Admin được xóa hóa đơn đã phê duyệt")
+    stored_path = Path(row.stored_path)
+    if not stored_path.is_file():
+        raise HTTPException(404, "Không tìm thấy file hóa đơn trên máy chủ")
+    audit(db, user, "invoice.delete", "invoice", row.id, row.original_name)
+    db.delete(row)
+    db.commit()
+    try:
+        stored_path.unlink()
+    except OSError as exc:
+        raise HTTPException(500, "Đã xóa bản ghi nhưng không thể xóa file hóa đơn") from exc
+    return {"message": "Đã xóa hóa đơn và file"}
+
+
 @router.patch("/{invoice_id}/review")
 def review_invoice(invoice_id: int, body: ReviewIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
     row = db.get(Invoice, invoice_id)
