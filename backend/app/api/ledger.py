@@ -6,8 +6,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.dependencies import current_user
-from app.models import GoodsReceipt, PurchaseOrder, Supplier, User
+from app.core.dependencies import current_user, require_roles
+from app.models import AuditEvent, GoodsReceipt, PurchaseOrder, Supplier, User
 
 router = APIRouter(prefix="/ledger", tags=["Module 2 · PO & Ledger"])
 
@@ -40,7 +40,9 @@ def suppliers(db: Session = Depends(get_db), _: User = Depends(current_user)):
 def add_supplier(body: SupplierIn, db: Session = Depends(get_db), _: User = Depends(current_user)):
     if db.query(Supplier).filter(Supplier.tax_code == body.tax_code).first():
         raise HTTPException(409, "Mã số thuế nhà cung cấp đã tồn tại")
-    row = Supplier(**body.model_dump()); db.add(row); db.commit(); db.refresh(row)
+    row = Supplier(**body.model_dump()); db.add(row); db.flush()
+    db.add(AuditEvent(actor_email=_.email, action="supplier.create", entity_type="supplier", entity_id=str(row.id), detail=row.name))
+    db.commit(); db.refresh(row)
     return {"id": row.id, **body.model_dump()}
 
 
@@ -55,7 +57,9 @@ def purchase_orders(db: Session = Depends(get_db), _: User = Depends(current_use
 def add_purchase_order(body: POIn, db: Session = Depends(get_db), _: User = Depends(current_user)):
     if db.query(PurchaseOrder).filter(PurchaseOrder.po_number == body.po_number).first():
         raise HTTPException(409, "Số PO đã tồn tại")
-    row = PurchaseOrder(**body.model_dump()); db.add(row); db.commit(); db.refresh(row)
+    row = PurchaseOrder(**body.model_dump()); db.add(row); db.flush()
+    db.add(AuditEvent(actor_email=_.email, action="purchase_order.create", entity_type="purchase_order", entity_id=str(row.id), detail=row.po_number))
+    db.commit(); db.refresh(row)
     return {"id": row.id, **body.model_dump(), "status": row.status}
 
 
@@ -71,12 +75,14 @@ def add_goods_receipt(body: GRIn, db: Session = Depends(get_db), _: User = Depen
         raise HTTPException(404, "Không tìm thấy PO")
     if db.query(GoodsReceipt).filter(GoodsReceipt.receipt_number == body.receipt_number).first():
         raise HTTPException(409, "Số phiếu nhập đã tồn tại")
-    row = GoodsReceipt(**body.model_dump()); db.add(row); db.commit(); db.refresh(row)
+    row = GoodsReceipt(**body.model_dump()); db.add(row); db.flush()
+    db.add(AuditEvent(actor_email=_.email, action="goods_receipt.create", entity_type="goods_receipt", entity_id=str(row.id), detail=row.receipt_number))
+    db.commit(); db.refresh(row)
     return {"id": row.id, **body.model_dump()}
 
 
 @router.post("/import/{kind}")
-async def import_ledger(kind: str, file: UploadFile = File(...), db: Session = Depends(get_db), _: User = Depends(current_user)):
+async def import_ledger(kind: str, file: UploadFile = File(...), db: Session = Depends(get_db), user: User = Depends(current_user)):
     if kind not in {"suppliers", "purchase-orders", "goods-receipts"}:
         raise HTTPException(404, "Loại dữ liệu không hỗ trợ")
     raw = await file.read()
@@ -118,11 +124,13 @@ async def import_ledger(kind: str, file: UploadFile = File(...), db: Session = D
         except (TypeError, ValueError, json.JSONDecodeError):
             skipped += 1
     db.commit()
+    db.add(AuditEvent(actor_email=user.email, action="ledger.import", entity_type=kind, entity_id="bulk", detail=f"created={created};skipped={skipped}"))
+    db.commit()
     return {"created": created, "skipped": skipped, "total_rows": len(rows)}
 
 
 @router.post("/clear-all")
-def clear_all(db: Session = Depends(get_db), _: User = Depends(current_user)):
+def clear_all(db: Session = Depends(get_db), _: User = Depends(require_roles("admin"))):
     from app.models import Invoice
     db.query(Invoice).delete()
     db.query(GoodsReceipt).delete()
@@ -133,7 +141,7 @@ def clear_all(db: Session = Depends(get_db), _: User = Depends(current_user)):
 
 
 @router.post("/seed-sample")
-def seed_sample(db: Session = Depends(get_db), _: User = Depends(current_user)):
+def seed_sample(db: Session = Depends(get_db), _: User = Depends(require_roles("admin"))):
     from app.seed import seed
     seed()
     return {"message": "Đã nạp lại bộ dữ liệu mẫu thành công."}
