@@ -1,0 +1,1206 @@
+[
+  {
+    "case_id": "exact_01",
+    "description": "exact",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 20,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "expected_codes": []
+  },
+  {
+    "case_id": "exact_02",
+    "description": "exact",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 20,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "expected_codes": []
+  },
+  {
+    "case_id": "exact_03",
+    "description": "exact",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 20,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "expected_codes": []
+  },
+  {
+    "case_id": "exact_04",
+    "description": "exact",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 20,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "expected_codes": []
+  },
+  {
+    "case_id": "exact_05",
+    "description": "exact",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 20,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "expected_codes": []
+  },
+  {
+    "case_id": "exact_06",
+    "description": "exact",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 20,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "expected_codes": []
+  },
+  {
+    "case_id": "price_mismatch_07",
+    "description": "price mismatch",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 24,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 12,
+          "amount": 24
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "expected_codes": [
+      "AMOUNT_MISMATCH",
+      "LINE_AMOUNT_MISMATCH",
+      "PRICE_MISMATCH"
+    ]
+  },
+  {
+    "case_id": "delivery_short_08",
+    "description": "delivery short",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 10,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 1,
+          "unit_price": 10,
+          "amount": 10
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "expected_codes": [
+      "AMOUNT_MISMATCH",
+      "DELIVERY_SHORT",
+      "GR_QUANTITY_MISMATCH",
+      "LINE_AMOUNT_MISMATCH",
+      "QUANTITY_MISMATCH"
+    ]
+  },
+  {
+    "case_id": "delivery_short_09",
+    "description": "delivery short",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 10,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 1,
+          "unit_price": 10,
+          "amount": 10
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "expected_codes": [
+      "AMOUNT_MISMATCH",
+      "DELIVERY_SHORT",
+      "GR_QUANTITY_MISMATCH",
+      "LINE_AMOUNT_MISMATCH",
+      "QUANTITY_MISMATCH"
+    ]
+  },
+  {
+    "case_id": "delivery_excess_10",
+    "description": "delivery excess",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 30,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 3,
+          "unit_price": 10,
+          "amount": 30
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "expected_codes": [
+      "AMOUNT_MISMATCH",
+      "DELIVERY_WRONG",
+      "GR_QUANTITY_MISMATCH",
+      "LINE_AMOUNT_MISMATCH",
+      "QUANTITY_MISMATCH"
+    ]
+  },
+  {
+    "case_id": "delivery_excess_11",
+    "description": "delivery excess",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 30,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 3,
+          "unit_price": 10,
+          "amount": 30
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "expected_codes": [
+      "AMOUNT_MISMATCH",
+      "DELIVERY_WRONG",
+      "GR_QUANTITY_MISMATCH",
+      "LINE_AMOUNT_MISMATCH",
+      "QUANTITY_MISMATCH"
+    ]
+  },
+  {
+    "case_id": "wrong_item_12",
+    "description": "wrong item",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 20,
+      "items": [
+        {
+          "name": "Different item 11",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "expected_codes": [
+      "DELIVERY_WRONG",
+      "ITEM_MISMATCH"
+    ]
+  },
+  {
+    "case_id": "wrong_item_13",
+    "description": "wrong item",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 20,
+      "items": [
+        {
+          "name": "Different item 12",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "expected_codes": [
+      "DELIVERY_WRONG",
+      "ITEM_MISMATCH"
+    ]
+  },
+  {
+    "case_id": "no_po_14",
+    "description": "no po",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 20,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "purchase_order": null,
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "expected_codes": [
+      "NO_PO"
+    ]
+  },
+  {
+    "case_id": "supplier_mismatch_15",
+    "description": "supplier mismatch",
+    "invoice": {
+      "seller_tax_code": "2222222222",
+      "total_amount": 20,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "expected_codes": [
+      "SUPPLIER_MISMATCH"
+    ]
+  },
+  {
+    "case_id": "amount_mismatch_16",
+    "description": "amount mismatch",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 30,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "expected_codes": [
+      "AMOUNT_MISMATCH",
+      "MATH_ERROR"
+    ]
+  },
+  {
+    "case_id": "footer_math_17",
+    "description": "footer math",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 25,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "expected_codes": [
+      "AMOUNT_MISMATCH",
+      "MATH_ERROR"
+    ]
+  },
+  {
+    "case_id": "missing_gr_18",
+    "description": "missing gr",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 20,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": null,
+    "expected_codes": []
+  },
+  {
+    "case_id": "empty_gr_19",
+    "description": "empty gr",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 20,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": []
+    },
+    "expected_codes": [
+      "EMPTY_GR"
+    ]
+  },
+  {
+    "case_id": "gr_short_20",
+    "description": "gr short",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 20,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 1,
+          "unit_price": 10,
+          "amount": 10
+        }
+      ]
+    },
+    "expected_codes": [
+      "DELIVERY_SHORT",
+      "GR_QUANTITY_MISMATCH"
+    ]
+  },
+  {
+    "case_id": "gr_short_21",
+    "description": "gr short",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 20,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 1,
+          "unit_price": 10,
+          "amount": 10
+        }
+      ]
+    },
+    "expected_codes": [
+      "DELIVERY_SHORT",
+      "GR_QUANTITY_MISMATCH"
+    ]
+  },
+  {
+    "case_id": "gr_excess_22",
+    "description": "gr excess",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 20,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 3,
+          "unit_price": 10,
+          "amount": 30
+        }
+      ]
+    },
+    "expected_codes": [
+      "DELIVERY_WRONG",
+      "GR_QUANTITY_MISMATCH"
+    ]
+  },
+  {
+    "case_id": "gr_wrong_item_23",
+    "description": "gr wrong item",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 20,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Wrong received item 22",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "expected_codes": [
+      "DELIVERY_WRONG",
+      "GR_ITEM_MISSING"
+    ]
+  },
+  {
+    "case_id": "missing_seller_tax_24",
+    "description": "missing seller tax",
+    "invoice": {
+      "seller_tax_code": "",
+      "total_amount": 20,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "expected_codes": [
+      "MISSING_SELLER_TAX"
+    ]
+  },
+  {
+    "case_id": "missing_total_25",
+    "description": "missing total",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": null,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "expected_codes": [
+      "MISSING_TOTAL"
+    ]
+  },
+  {
+    "case_id": "missing_invoice_items_26",
+    "description": "missing invoice items",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 20,
+      "items": []
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "expected_codes": [
+      "INVOICE_ITEMS_MISSING"
+    ]
+  },
+  {
+    "case_id": "price_mismatch_27",
+    "description": "price mismatch",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 24,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 12,
+          "amount": 24
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "expected_codes": [
+      "AMOUNT_MISMATCH",
+      "LINE_AMOUNT_MISMATCH",
+      "PRICE_MISMATCH"
+    ]
+  },
+  {
+    "case_id": "delivery_short_28",
+    "description": "delivery short",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 10,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 1,
+          "unit_price": 10,
+          "amount": 10
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "expected_codes": [
+      "AMOUNT_MISMATCH",
+      "DELIVERY_SHORT",
+      "GR_QUANTITY_MISMATCH",
+      "LINE_AMOUNT_MISMATCH",
+      "QUANTITY_MISMATCH"
+    ]
+  },
+  {
+    "case_id": "no_po_29",
+    "description": "no po",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 20,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "purchase_order": null,
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "expected_codes": [
+      "NO_PO"
+    ]
+  },
+  {
+    "case_id": "footer_math_30",
+    "description": "footer math",
+    "invoice": {
+      "seller_tax_code": "1111111111",
+      "total_amount": 25,
+      "items": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "purchase_order": {
+      "supplier_tax_code": "1111111111",
+      "total_amount": 20,
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "goods_receipt": {
+      "lines": [
+        {
+          "name": "Widget",
+          "quantity": 2,
+          "unit_price": 10,
+          "amount": 20
+        }
+      ]
+    },
+    "expected_codes": [
+      "AMOUNT_MISMATCH",
+      "MATH_ERROR"
+    ]
+  }
+]
