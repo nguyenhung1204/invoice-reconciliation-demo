@@ -119,3 +119,21 @@ async def import_ledger(kind: str, file: UploadFile = File(...), db: Session = D
             skipped += 1
     db.commit()
     return {"created": created, "skipped": skipped, "total_rows": len(rows)}
+
+
+@router.post("/clear-all")
+def clear_all(db: Session = Depends(get_db), _: User = Depends(current_user)):
+    from app.models import Invoice
+    db.query(Invoice).delete()
+    db.query(GoodsReceipt).delete()
+    db.query(PurchaseOrder).delete()
+    db.query(Supplier).delete()
+    db.commit()
+    return {"message": "Đã xóa toàn bộ dữ liệu đơn hàng và hóa đơn."}
+
+
+@router.post("/seed-sample")
+def seed_sample(db: Session = Depends(get_db), _: User = Depends(current_user)):
+    from app.seed import seed
+    seed()
+    return {"message": "Đã nạp lại bộ dữ liệu mẫu thành công."}

@@ -1,94 +1,23 @@
 <!doctype html>
-<html lang="vi">
-<head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#0d1117"><title>Invoice Desk</title>
-  <link rel="stylesheet" href="/assets/styles.css"><link rel="stylesheet" href="/assets/reference.css"><link rel="stylesheet" href="/assets/matching.css">
-</head>
-<body>
-  <div id="login-screen" class="login-screen hidden">
-    <form id="login-form" class="login-card">
-      <div class="brand-mark">I</div><p class="eyebrow">INVOICE WORKSPACE</p>
-      <h1>Đăng nhập hệ thống</h1><p class="muted">Quản trị hóa đơn và đối soát nội bộ</p>
-      <label>Email<input name="username" type="email" autocomplete="username" required placeholder="admin@gmail.com"></label>
-      <label>Mật khẩu<input name="password" type="password" autocomplete="current-password" required></label>
-      <button class="primary full" type="submit">Đăng nhập</button><p id="login-error" class="error"></p>
-    </form>
-  </div>
-  <div id="app" class="shell hidden">
-    <aside class="sidebar">
-      <a class="brand" href="#dashboard"><span class="brand-mark">I</span><span>Invoice Desk<small>Finance workspace</small></span></a>
-      <div class="side-label">WORKSPACE</div>
-      <nav id="navigation">
-        <button class="nav-item active" data-view="dashboard"><span>▦</span><span class="nav-copy"><b>Tổng quan & Giám sát</b><small>KPIs & tiến trình RPA</small></span></button>
-        <button class="nav-item" data-view="invoices"><span>▱</span><span class="nav-copy"><b>Tiếp nhận & Hàng đợi</b><small>OpenCV & PaddleOCR</small></span><kbd id="queue-count">0</kbd></button>
-        <button class="nav-item" data-view="reconcile"><span>⇄</span><span class="nav-copy"><b>Đối soát 3 bên</b><small>Hóa đơn · PO · GR</small></span><kbd id="mismatch-count">0</kbd></button>
-        <button class="nav-item" data-view="ledger"><span>▤</span><span class="nav-copy"><b>Dữ liệu PO & Phiếu kho</b><small>Đơn hàng & nhà cung cấp</small></span></button>
-        <button class="nav-item" data-view="reports"><span>▧</span><span class="nav-copy"><b>Báo cáo & Cấu hình</b><small>Audit trail & xuất file</small></span></button>
-      </nav>
-      <div class="sidebar-bottom"><div class="side-label">SYSTEM</div>
-        <button class="nav-item" data-view="settings"><span>⚙</span>Cấu hình</button>
-        <div class="profile"><div class="avatar" id="avatar-side">A</div><div class="profile-copy"><b id="user-email-side">Admin</b><small id="user-role-side">Quản trị viên</small></div></div>
-      </div>
-    </aside>
-    <main class="main">
-      <header class="topbar"><span id="page-title" class="hidden">Tổng quan</span><div class="worker-tools"><span class="system-pill"><span class="pulse"></span><b>RPA Worker:</b> <span id="worker-state">Đang chờ</span> <i>|</i> Quét thư mục inbox</span><button class="secondary scan-button" id="scan-now">⟳ Quét thư mục ngay</button></div><div class="top-actions"><button class="icon-button" id="refresh" title="Làm mới">⟳</button><button class="icon-button notification-button" id="alerts-button" title="Cảnh báo">♧<span id="alert-badge" class="alert-badge hidden">0</span></button><div class="account-chip"><span class="avatar" id="avatar">A</span><span><b id="user-email">Admin</b><small id="user-role">Quản trị viên</small></span></div><button class="primary header-upload" id="upload-top">＋ Tải hóa đơn</button><button class="icon-button" id="logout" title="Đăng xuất">↗</button></div></header>
-      <section class="content">
-          <div class="page-heading"><div><p class="eyebrow">AUTOINVOICE · RPA + OCR</p><h1 id="heading">Dashboard Thống Kê & Giám Sát Tiến Trình RPA</h1><p class="muted" id="subheading">Giám sát tiếp nhận, trích xuất OCR và đối soát hóa đơn đầu vào.</p></div><div class="heading-actions"><div class="date-chip" id="today"></div><button class="primary" data-go="invoices">Quản lý hàng đợi ↗</button></div></div>
-        <section id="view-dashboard" class="view">
-          <div class="metric-grid">
-            <article class="metric-card"><div class="metric-top"><span>TỔNG HÓA ĐƠN TIẾP NHẬN</span><span class="metric-icon blue">▤</span></div><strong id="metric-total">—</strong><small>Tất cả file hóa đơn trong hệ thống</small></article>
-            <article class="metric-card"><div class="metric-top"><span>TỈ LỆ KHỚP TỰ ĐỘNG</span><span class="metric-icon green">✓</span></div><strong id="metric-match-rate">—</strong><small>Đã khớp / đã đối soát</small></article>
-            <article class="metric-card danger-metric"><div class="metric-top"><span>SAI LỆCH CHỜ XỬ LÝ</span><span class="metric-icon amber">⚠</span></div><strong id="metric-review">—</strong><small>Cần kế toán kiểm tra</small></article>
-            <article class="metric-card"><div class="metric-top"><span>CHỜ OCR / RÀ SOÁT</span><span class="metric-icon violet">✦</span></div><strong id="metric-pending">—</strong><small>Đang trong hàng đợi</small></article>
-          </div>
-          <div class="ops-grid"><article class="panel chart-panel"><div class="section-head"><div><h2>Xu hướng xử lý hóa đơn 7 ngày gần nhất</h2><p class="muted">Phân bổ theo trạng thái xử lý</p></div><div class="legend"><span><i class="lg-green"></i>Đã khớp</span><span><i class="lg-red"></i>Sai lệch</span><span><i class="lg-amber"></i>Cần xác nhận</span></div></div><div id="status-chart" class="status-chart"></div></article><article class="panel causes-panel"><div class="section-head"><div><h2>Các lỗi sai lệch phát hiện</h2><p class="muted">Theo cảnh báo hiện có</p></div></div><div id="error-causes" class="error-causes"></div><div class="insight-note"><b>Gợi ý vận hành</b><br>Kiểm tra các trường confidence thấp trước khi phê duyệt.</div></article></div>
-          <div class="ops-grid lower-grid"><article class="panel scheduler-panel"><div class="section-head"><div><h2>Tiến trình nhận file định kỳ</h2><p class="muted">Theo dõi thư mục inbox cục bộ đã cấu hình</p></div><span id="scheduler-badge" class="scheduler-badge">Đang kiểm tra</span></div><div class="job-card"><span class="job-icon">◷</span><div><b>Job 1 · Quét thư mục inbox</b><p id="scheduler-detail">Tự động mỗi phút khi INBOX_SCAN_DIR được cấu hình.</p></div><button class="secondary" id="scan-now-secondary">Quét ngay</button></div></article><article class="panel suppliers-panel"><div class="section-head"><div><h2>Nhà cung cấp trong sổ sách</h2><p class="muted">Danh mục đối chiếu hiện có</p></div><button class="text-button" data-go="ledger">Mở sổ sách →</button></div><div id="supplier-summary" class="supplier-summary"></div></article></div>
-          <div class="section-head"><div><h2>Hoạt động gần đây</h2><p class="muted">Hóa đơn mới nhất được cập nhật trong hệ thống</p></div><button class="text-button" data-go="invoices">Xem tất cả <span>→</span></button></div>
-          <div class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>HÓA ĐƠN</th><th>NGÀY TẢI LÊN</th><th>TỔNG TIỀN</th><th>TRẠNG THÁI</th><th></th></tr></thead><tbody id="recent-table"></tbody></table><div id="recent-empty" class="empty hidden">Chưa có hóa đơn. Tải file đầu tiên để bắt đầu.</div></div></div>
-          <div class="feature-grid"><article class="feature-card"><div class="feature-icon blue">✦</div><div><b>OCR có kiểm soát</b><p>Kết quả nhận dạng luôn có thể được kế toán rà soát trước khi duyệt.</p></div><span class="feature-status">MODULE 04</span></article><article class="feature-card"><div class="feature-icon green">⇄</div><div><b>Đối soát theo quy tắc</b><p>So khớp hóa đơn với PO, phiếu nhập và ngưỡng sai số cấu hình.</p></div><span class="feature-status">MODULE 05</span></article></div>
-        </section>
-        <section id="view-invoices" class="view hidden">
-          <div class="toolbar"><div class="filter-search"><span>⌕</span><input id="invoice-search" placeholder="Tìm tên file, MST, số hóa đơn..."></div><select id="status-filter"><option value="">Tất cả trạng thái</option><option value="needs_review">Cần rà soát</option><option value="ocr_done">OCR hoàn tất</option><option value="reviewed">Đã rà soát</option><option value="matched">Đã khớp</option><option value="mismatch">Có sai lệch</option><option value="approved">Đã duyệt</option></select><button class="primary" id="upload-list">＋ Tải hóa đơn</button></div>
-          <div class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>TÊN FILE</th><th>MST BÊN BÁN</th><th>SỐ HÓA ĐƠN</th><th>NGÀY</th><th>TỔNG TIỀN</th><th>TRẠNG THÁI</th><th></th></tr></thead><tbody id="invoice-table"></tbody></table><div id="invoice-empty" class="empty hidden">Chưa có dữ liệu phù hợp.</div></div></div>
-        </section>
-        <section id="view-ledger" class="view hidden"><div class="module-grid"><article class="panel module-card"><div class="module-heading"><span class="metric-icon blue">⌂</span><span class="feature-status">MODULE 02</span></div><h2>Nhà cung cấp</h2><p class="muted">Danh mục doanh nghiệp và mã số thuế dùng để đối chiếu.</p><form id="supplier-form" class="inline-form"><input name="tax_code" placeholder="Mã số thuế" required><input name="name" placeholder="Tên nhà cung cấp" required><button class="primary">Thêm</button></form><div id="suppliers-list" class="compact-list"></div></article>
-          <article class="panel module-card"><div class="module-heading"><span class="metric-icon violet">▦</span><span class="feature-status">PO / GR</span></div><h2>Đơn hàng & sổ sách</h2><p class="muted">Nhập danh sách PO/phiếu nhập từ CSV hoặc XLSX.</p><form id="ledger-import" class="upload-zone compact-upload"><input name="file" type="file" accept=".csv,.xlsx" required><select name="kind"><option value="purchase-orders">Đơn đặt hàng</option><option value="goods-receipts">Phiếu nhập kho</option><option value="suppliers">Nhà cung cấp</option></select><button class="secondary">Import file</button></form><div id="ledger-message" class="muted"></div></article></div></section>
-        <section id="view-reconcile" class="view hidden"><div class="match-toolbar panel"><div class="match-step"><button class="icon-button" id="match-prev">‹</button><b id="match-code">—</b><button class="icon-button" id="match-next">›</button></div><select id="match-select"><option value="">Chọn hóa đơn cần đối soát</option></select><span class="muted">Trạng thái:</span><span id="match-status" class="status needs_review">Chờ rà soát</span></div><div class="matching-layout"><article class="panel document-panel"><div class="document-head"><div><b id="document-name">Chưa chọn hóa đơn</b><small>Ảnh/PDF gốc · xem ngay trên trang</small></div></div><iframe id="match-doc" title="Ảnh/PDF hóa đơn"></iframe><div id="document-placeholder" class="empty">Chọn một hóa đơn để xem file gốc.</div></article><div class="matching-right"><div id="match-alerts" class="panel alert-panel hidden"></div><article class="panel detail-panel"><div class="detail-heading"><b>PHẦN 1 · ĐỐI CHIẾU THÔNG TIN CHUNG</b><small>Trường OCR có thể sửa tại Rà soát</small></div><div id="match-fields" class="match-fields"></div></article><article class="panel detail-panel"><div class="detail-heading"><b>PHẦN 2 · BẢNG ĐỐI SOÁT MẶT HÀNG 3 BÊN</b><small>Hóa đơn · PO · phiếu nhập</small></div><div class="table-wrap"><table class="line-match-table"><thead><tr><th>MẶT HÀNG</th><th>PO</th><th>SL HĐ/PO/GR</th><th>ĐƠN GIÁ HĐ/PO</th><th>TRẠNG THÁI</th></tr></thead><tbody id="match-items"></tbody></table><div id="match-items-empty" class="empty hidden">Chưa có dòng hàng OCR hoặc PO chưa liên kết.</div></div></article><div class="match-actions"><button class="secondary" id="match-edit">Rà soát / sửa dữ liệu</button><button class="primary" id="match-run">Chạy đối soát</button><button class="success-button hidden" id="match-approve">Phê duyệt</button></div><div class="panel table-panel queue-panel"><div class="section-head inner"><div><h2>Hàng đợi đối soát</h2><p class="muted">Chọn hóa đơn để xem ảnh và xử lý cảnh báo.</p></div></div><div class="table-wrap"><table><thead><tr><th>HÓA ĐƠN</th><th>PO LIÊN KẾT</th><th>CẢNH BÁO</th><th>TRẠNG THÁI</th><th></th></tr></thead><tbody id="reconcile-table"></tbody></table><div id="reconcile-empty" class="empty hidden">Tải hóa đơn và rà soát dữ liệu trước khi đối soát.</div></div></div></div></div></section>
-        <section id="view-reports" class="view hidden"><div class="report-actions panel"><div><h2>Báo cáo & xuất dữ liệu</h2><p class="muted">Xuất danh sách hóa đơn để tiếp tục hạch toán hoặc phân tích.</p></div><div class="button-row"><a class="secondary button-link" href="/api/reports/export.csv" id="export-csv">Tải CSV</a><a class="primary button-link" href="/api/reports/export.xlsx" id="export-xlsx">Tải Excel</a></div></div><div class="panel"><div class="section-head inner"><div><h2>Nhật ký thao tác</h2><p class="muted">Audit trail cho upload, rà soát, đối soát và phê duyệt.</p></div></div><div id="audit-list" class="audit-list"></div></div></section>
-        <section id="view-settings" class="view hidden"><div class="panel settings-card"><span class="feature-status">MODULE 01 · ACCESS CONTROL</span><h2>Tài khoản & phân quyền</h2><p class="muted">Vai trò hiện tại quyết định quyền truy cập thao tác.</p><div class="role-grid"><div><b>Admin</b><p>Cấu hình hệ thống, tài khoản và tích hợp.</p></div><div><b>Kế toán viên</b><p>Tải hóa đơn, rà soát OCR và cập nhật dữ liệu.</p></div><div><b>Kế toán trưởng</b><p>Đối soát, phê duyệt và xem báo cáo.</p></div></div><div id="user-admin" class="user-admin hidden"><div class="section-head"><div><h2>Quản lý tài khoản</h2><p class="muted">Chỉ Admin được tạo người dùng.</p></div></div><form id="user-form" class="inline-form"><input name="email" type="email" placeholder="Email" required><input name="password" type="password" placeholder="Mật khẩu, tối thiểu 10 ký tự" minlength="10" required><select name="role"><option value="accountant">Kế toán viên</option><option value="chief_accountant">Kế toán trưởng</option><option value="admin">Admin</option></select><button class="primary">Tạo tài khoản</button></form><div id="users-list" class="compact-list"></div></div></div></section>
-      </section>
-    </main>
-  </div>
-  <input id="file-input" type="file" accept="application/pdf,image/png,image/jpeg" hidden>
-  <div id="toast" class="toast"></div>
-  <dialog id="review-dialog" class="review-dialog">
-    <form id="review-form">
-      <div class="dialog-head">
-        <div><p class="eyebrow">HUMAN REVIEW</p><h2>Rà soát hóa đơn</h2></div>
-        <div><button type="button" class="secondary" id="retry-ocr">Nhận dạng lại</button><button type="button" class="icon-button" id="close-review">×</button></div>
-      </div>
-      <input name="id" type="hidden">
-      <div class="review-layout">
-        <section class="review-preview-pane">
-          <div class="review-preview-head"><b>Hóa đơn gốc</b><small>So sánh với thông tin rà soát bên cạnh</small></div>
-          <div id="review-preview-placeholder" class="review-preview-placeholder">Đang tải ảnh/PDF…</div>
-          <iframe id="review-file-preview" class="review-preview-frame hidden" title="Ảnh hoặc PDF hóa đơn gốc"></iframe>
-        </section>
-        <div class="review-form-pane">
-          <div class="review-grid">
-            <label>MST bên bán<input name="seller_tax_code"></label><label>MST bên mua<input name="buyer_tax_code"></label>
-            <label>Số hóa đơn<input name="invoice_number"></label><label>Ngày hóa đơn<input name="invoice_date"></label>
-            <label>Tổng tiền<input name="total_amount" type="number" step="1"></label><label>Số PO<input name="po_number"></label>
-            <label class="span-2">Ghi chú rà soát<input name="review_note"></label>
-            <label class="span-2">Các dòng mặt hàng (mỗi dòng: tên | số lượng | đơn giá)<textarea name="items_text" rows="4"></textarea></label>
-            <label class="span-2">Văn bản OCR thô<textarea name="ocr_text" rows="5" readonly></textarea></label>
-          </div>
-        </div>
-      </div>
-      <div class="dialog-actions"><button type="button" class="secondary" id="cancel-review">Hủy</button><button class="primary" type="submit">Lưu rà soát</button></div>
-    </form>
-  </dialog>
-  <script src="/assets/app.js" defer></script>
-</body>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AutoInvoice RPA - Hệ thống Đối soát Hóa đơn Kế toán Thông tư 78</title>
+    <meta name="description" content="Hệ thống tự động hóa trích xuất, chuẩn hóa và đối soát 3 bên dữ liệu hóa đơn kế toán ứng dụng OCR và RPA." />
+    <meta property="og:title" content="AutoInvoice RPA - Hệ thống Đối soát Hóa đơn Kế toán Thông tư 78" />
+    <meta property="og:description" content="Hệ thống tự động hóa trích xuất, chuẩn hóa và đối soát 3 bên dữ liệu hóa đơn kế toán ứng dụng OCR và RPA." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:ital,wght@0,300..900;1,300..900&family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet" />
+    <script type="module" crossorigin src="/assets/index-CIEau9oz.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-C6aGdCWd.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
 </html>
+

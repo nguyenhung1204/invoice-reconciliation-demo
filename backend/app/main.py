@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -49,13 +50,23 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(auth.router, prefix="/api")
 app.include_router(ledger.router, prefix="/api")
 app.include_router(invoices.router, prefix="/api")
 app.include_router(reports.router, prefix="/api")
 
 frontend_dir = Path(__file__).resolve().parents[2] / "frontend"
-app.mount("/assets", StaticFiles(directory=frontend_dir / "src"), name="assets")
+assets_dir = (frontend_dir / "assets") if (frontend_dir / "assets").exists() else (frontend_dir / "src")
+app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
 
 @app.get("/health")
@@ -63,6 +74,31 @@ def health():
     return {"status": "ok", "service": settings.app_name}
 
 
+@app.get("/pdf.worker.min.js")
+def pdf_worker():
+    target = frontend_dir / "pdf.worker.min.js"
+    if target.is_file():
+        return FileResponse(target, media_type="application/javascript")
+    raise HTTPException(404, "Không tìm thấy pdf.worker.min.js")
+
+
+@app.get("/sample_vat_invoice.pdf")
+def sample_pdf():
+    target = frontend_dir / "sample_vat_invoice.pdf"
+    if target.is_file():
+        return FileResponse(target, media_type="application/pdf")
+    raise HTTPException(404, "Không tìm thấy sample_vat_invoice.pdf")
+
+
 @app.get("/")
-def index():
+@app.get("/{full_path:path}")
+def index(full_path: str = ""):
+    if full_path and not full_path.startswith("api/"):
+        target = frontend_dir / full_path
+        if target.is_file():
+            mime = "application/javascript" if full_path.endswith(".js") else (
+                "application/pdf" if full_path.endswith(".pdf") else None
+            )
+            return FileResponse(target, media_type=mime)
     return FileResponse(frontend_dir / "index.html")
+
