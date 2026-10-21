@@ -53,6 +53,16 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 
+
+@app.middleware("http")
+async def revalidate_active_frontend(request, call_next):
+    response = await call_next(request)
+    content_type = response.headers.get("content-type", "")
+    if content_type.startswith("text/html") or content_type.startswith("application/javascript"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    return response
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
