@@ -1,19 +1,21 @@
-USE invoice_reconciliation_data;
+USE `invoice_reconciliation`;
 
 CREATE TABLE IF NOT EXISTS reconciliation_runs (
-  reconciliation_run_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  invoice_id BIGINT UNSIGNED NOT NULL,
-  po_id BIGINT UNSIGNED NULL,
-  gr_id BIGINT UNSIGNED NULL,
-  status VARCHAR(32) NOT NULL,
-  amount_tolerance DECIMAL(18,2) NOT NULL DEFAULT 0,
-  started_at DATETIME NULL,
-  finished_at DATETIME NULL,
-  run_by_user_id BIGINT UNSIGNED NULL,
-  PRIMARY KEY (reconciliation_run_id),
-  KEY ix_reconciliation_runs_invoice (invoice_id),
-  CONSTRAINT fk_reconciliation_runs_invoice FOREIGN KEY (invoice_id) REFERENCES invoices (invoice_id),
-  CONSTRAINT fk_reconciliation_runs_po FOREIGN KEY (po_id) REFERENCES purchase_orders (po_id),
-  CONSTRAINT fk_reconciliation_runs_gr FOREIGN KEY (gr_id) REFERENCES goods_receipts (gr_id),
-  CONSTRAINT fk_reconciliation_runs_user FOREIGN KEY (run_by_user_id) REFERENCES users (user_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+	reconciliation_run_id INTEGER NOT NULL AUTO_INCREMENT,
+	invoice_id INTEGER NOT NULL,
+	review_id INTEGER,
+	po_id INTEGER,
+	gr_id INTEGER,
+	status VARCHAR(32) NOT NULL,
+	result_json JSON NOT NULL,
+	amount_tolerance NUMERIC(18, 2) NOT NULL,
+	started_at DATETIME,
+	finished_at DATETIME,
+	run_by_user_id INTEGER,
+	PRIMARY KEY (reconciliation_run_id),
+	FOREIGN KEY(invoice_id) REFERENCES invoices (id),
+	FOREIGN KEY(review_id) REFERENCES invoice_reviews (review_id),
+	FOREIGN KEY(po_id) REFERENCES purchase_orders (id),
+	FOREIGN KEY(gr_id) REFERENCES goods_receipts (id),
+	FOREIGN KEY(run_by_user_id) REFERENCES users (id)
+);

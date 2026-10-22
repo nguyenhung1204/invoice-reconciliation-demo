@@ -19,14 +19,16 @@ def reconcile(invoice, purchase_order=None, goods_receipt=None, amount_tolerance
     warnings = []
     if not invoice.seller_tax_code:
         warnings.append({"code": "MISSING_SELLER_TAX", "message": "Thiếu mã số thuế bên bán"})
-    if invoice.total_amount is None:
+    invoice_total = _number(invoice.total_amount)
+    if invoice_total is None:
         warnings.append({"code": "MISSING_TOTAL", "message": "Chưa nhận diện tổng tiền"})
     if not purchase_order:
         warnings.append({"code": "NO_PO", "message": "Chưa liên kết đơn đặt hàng"})
     else:
         if invoice.seller_tax_code and invoice.seller_tax_code != purchase_order.supplier_tax_code:
             warnings.append({"code": "SUPPLIER_MISMATCH", "message": "Mã số thuế nhà cung cấp khác PO"})
-        if invoice.total_amount is not None and abs(invoice.total_amount - purchase_order.total_amount) > amount_tolerance:
+        po_total = _number(purchase_order.total_amount)
+        if invoice_total is not None and po_total is not None and abs(invoice_total - po_total) > amount_tolerance:
             warnings.append({"code": "AMOUNT_MISMATCH", "message": "Tổng tiền hóa đơn lệch PO"})
         expected = purchase_order.lines or []
         actual = invoice_items_for_api(invoice)
@@ -81,7 +83,7 @@ def reconcile(invoice, purchase_order=None, goods_receipt=None, amount_tolerance
     if goods_receipt and not goods_receipt.lines:
         warnings.append({"code": "EMPTY_GR", "message": "Phiếu nhập kho chưa có dòng hàng"})
     invoice_items = invoice_items_for_api(invoice)
-    if invoice.total_amount is not None and invoice_items:
+    if invoice_total is not None and invoice_items:
         line_amounts = []
         for item in invoice_items:
             line_amount = _number(item.get("amount"))
@@ -92,6 +94,6 @@ def reconcile(invoice, purchase_order=None, goods_receipt=None, amount_tolerance
                     break
                 line_amount = unit_price * quantity
             line_amounts.append(line_amount)
-        if line_amounts and abs(invoice.total_amount - sum(line_amounts)) > amount_tolerance:
+        if line_amounts and abs(invoice_total - sum(line_amounts)) > amount_tolerance:
             warnings.append({"code": "MATH_ERROR", "message": "Tổng tiền hóa đơn không khớp tổng thành tiền các dòng hàng"})
     return warnings

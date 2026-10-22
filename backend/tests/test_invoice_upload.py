@@ -8,6 +8,7 @@ from starlette.datastructures import Headers, UploadFile
 
 from app.api import invoices
 from app.core.database import Base
+from app.models import Invoice, InvoiceFile, InvoiceOCRRun
 
 
 def test_upload_saves_invoice_when_ocr_succeeds(tmp_path, monkeypatch):
@@ -46,6 +47,9 @@ def test_upload_saves_invoice_when_ocr_succeeds(tmp_path, monkeypatch):
             result = complete.value
         assert result["status"] == "ocr_done"
         assert result["ocr_text"] == "OCR text"
+        invoice = session.query(Invoice).one()
+        assert session.query(InvoiceFile).filter_by(invoice_id=invoice.id).count() == 1
+        assert session.query(InvoiceOCRRun).filter_by(invoice_id=invoice.id, status="succeeded").count() == 1
     finally:
         file_bytes.close()
         session.close()

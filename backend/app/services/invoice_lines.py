@@ -2,6 +2,8 @@
 
 from decimal import Decimal, InvalidOperation
 
+from sqlalchemy.orm import object_session
+
 from app.models import Invoice, InvoiceItem
 
 
@@ -15,10 +17,14 @@ def _decimal(value) -> Decimal | None:
 
 
 def sync_invoice_items(invoice: Invoice, items: list[dict], *, source: str) -> None:
-    """Persist editable/OCR line data in the normalized table and legacy JSON."""
+    """Persist editable/OCR line data in the normalized invoice-item table."""
     clean_items = [item for item in items if isinstance(item, dict)]
-    invoice.items = clean_items
     invoice.item_rows.clear()
+    # The line-number unique constraint requires old rows to be deleted before
+    # replacements with the same (invoice_id, line_number) are inserted.
+    session = object_session(invoice)
+    if session is not None:
+        session.flush()
     for line_number, item in enumerate(clean_items, start=1):
         description = str(item.get("name") or item.get("description") or "").strip()
         if not description:
@@ -37,10 +43,12 @@ def sync_invoice_items(invoice: Invoice, items: list[dict], *, source: str) -> N
 
 
 def invoice_items_for_api(invoice: Invoice) -> list[dict]:
-    """Return normalized rows when present, falling back to pre-migration JSON."""
+    """Return normalized invoice rows in the stable API payload shape."""
     rows = getattr(invoice, "item_rows", None)
     if not rows:
-        return invoice.items or []
+        # Keep the pure reconciliation service compatible with legacy callers
+        # that pass simple objects; persisted ORM invoices use invoice_items.
+        return list(getattr(invoice, "items", None) or [])
     return [
         {
             "name": row.item_description,

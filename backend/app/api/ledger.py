@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.dependencies import current_user, require_roles
 from app.models import AuditEvent, GoodsReceipt, Invoice, PurchaseOrder, Supplier, User
+from app.services.procurement_lines import sync_goods_receipt_lines, sync_purchase_order_lines
 
 router = APIRouter(prefix="/ledger", tags=["Module 2 · PO & Ledger"])
 
@@ -46,7 +47,7 @@ class GRUpdate(BaseModel):
 
 
 def record_audit(db, user, action, entity_type, entity_id, detail=""):
-    db.add(AuditEvent(actor_email=user.email, action=action, entity_type=entity_type,
+    db.add(AuditEvent(actor_user_id=getattr(user, "id", None), actor_email=user.email, action=action, entity_type=entity_type,
                       entity_id=str(entity_id), detail=detail))
 
 
@@ -76,10 +77,25 @@ def purchase_orders(db: Session = Depends(get_db), _: User = Depends(current_use
 def add_purchase_order(body: POIn, db: Session = Depends(get_db), _: User = Depends(current_user)):
     if db.query(PurchaseOrder).filter(PurchaseOrder.po_number == body.po_number).first():
         raise HTTPException(409, "Số PO đã tồn tại")
-    row = PurchaseOrder(**body.model_dump()); db.add(row); db.flush()
+    supplier = db.query(Supplier).filter_by(tax_code=body.supplier_tax_code).first()
+    if supplier is None:
+        raise HTTPException(404, "Không tìm thấy nhà cung cấp theo mã số thuế")
+    row = PurchaseOrder(
+        po_number=body.po_number,
+        supplier_id=supplier.id,
+        supplier_tax_code=supplier.tax_code,
+        total_amount=body.total_amount,
+    )
+    db.add(row); db.flush()
+    try:
+        sync_purchase_order_lines(row, body.lines)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(422, str(exc)) from exc
     record_audit(db, _, "purchase_order.create", "purchase_order", row.id, row.po_number)
     db.commit(); db.refresh(row)
-    return {"id": row.id, **body.model_dump(), "status": row.status}
+    return {"id": row.id, "po_number": row.po_number, "supplier_tax_code": row.supplier_tax_code,
+            "total_amount": float(row.total_amount), "lines": row.lines, "status": row.status}
 
 
 @router.patch("/purchase-orders/{po_id}")
@@ -92,8 +108,29 @@ def update_purchase_order(po_id: int, body: POUpdate, db: Session = Depends(get_
         raise HTTPException(422, "Cần cung cấp các giá trị cập nhật hợp lệ")
     if "po_number" in values and db.query(PurchaseOrder).filter(PurchaseOrder.po_number == values["po_number"], PurchaseOrder.id != po_id).first():
         raise HTTPException(409, "Số PO đã tồn tại")
+    supplier_tax_code = values.pop("supplier_tax_code", None)
+    if supplier_tax_code is not None:
+        supplier = db.query(Supplier).filter_by(tax_code=supplier_tax_code).first()
+        if supplier is None:
+            raise HTTPException(404, "Không tìm thấy nhà cung cấp theo mã số thuế")
+        row.supplier_id = supplier.id
+        row.supplier_tax_code = supplier.tax_code
+    lines = values.pop("lines", None)
+    old_po_number = row.po_number
     for key, value in values.items():
         setattr(row, key, value)
+    if lines is not None:
+        try:
+            sync_purchase_order_lines(row, lines)
+        except ValueError as exc:
+            db.rollback()
+            raise HTTPException(422, str(exc)) from exc
+    if row.po_number != old_po_number:
+        for receipt in row.goods_receipts:
+            receipt.po_number = row.po_number
+        for invoice in row.invoices:
+            invoice.po_number = row.po_number
+            invoice.po_reference_text = row.po_number
     record_audit(db, user, "purchase_order.update", "purchase_order", row.id, ",".join(sorted(values)))
     db.commit(); db.refresh(row)
     return {"id": row.id, "po_number": row.po_number, "supplier_tax_code": row.supplier_tax_code,
@@ -105,7 +142,7 @@ def delete_purchase_order(po_id: int, db: Session = Depends(get_db), user: User 
     row = db.get(PurchaseOrder, po_id)
     if not row:
         raise HTTPException(404, "Không tìm thấy PO")
-    if db.query(GoodsReceipt).filter_by(po_number=row.po_number).first() or db.query(Invoice).filter_by(po_number=row.po_number).first():
+    if db.query(GoodsReceipt).filter_by(po_id=row.id).first() or db.query(Invoice).filter_by(po_id=row.id).first():
         raise HTTPException(409, "Không thể xóa PO đang được phiếu nhập hoặc hóa đơn tham chiếu")
     record_audit(db, user, "purchase_order.delete", "purchase_order", row.id, row.po_number)
     db.delete(row); db.commit()
@@ -120,14 +157,27 @@ def goods_receipts(db: Session = Depends(get_db), _: User = Depends(current_user
 
 @router.post("/goods-receipts", status_code=201)
 def add_goods_receipt(body: GRIn, db: Session = Depends(get_db), _: User = Depends(current_user)):
-    if not db.query(PurchaseOrder).filter(PurchaseOrder.po_number == body.po_number).first():
+    purchase_order = db.query(PurchaseOrder).filter(PurchaseOrder.po_number == body.po_number).first()
+    if not purchase_order:
         raise HTTPException(404, "Không tìm thấy PO")
     if db.query(GoodsReceipt).filter(GoodsReceipt.receipt_number == body.receipt_number).first():
         raise HTTPException(409, "Số phiếu nhập đã tồn tại")
-    row = GoodsReceipt(**body.model_dump()); db.add(row); db.flush()
+    row = GoodsReceipt(
+        receipt_number=body.receipt_number,
+        po_id=purchase_order.id,
+        po_number=purchase_order.po_number,
+        purchase_order=purchase_order,
+    )
+    db.add(row); db.flush()
+    try:
+        sync_goods_receipt_lines(row, body.lines)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(422, str(exc)) from exc
     record_audit(db, _, "goods_receipt.create", "goods_receipt", row.id, row.receipt_number)
     db.commit(); db.refresh(row)
-    return {"id": row.id, **body.model_dump()}
+    return {"id": row.id, "receipt_number": row.receipt_number, "po_number": row.po_number,
+            "lines": row.lines, "received_at": row.received_at.isoformat()}
 
 
 @router.patch("/goods-receipts/{receipt_id}")
@@ -138,12 +188,26 @@ def update_goods_receipt(receipt_id: int, body: GRUpdate, db: Session = Depends(
     values = body.model_dump(exclude_unset=True)
     if not values or any(value is None for value in values.values()):
         raise HTTPException(422, "Cần cung cấp các giá trị cập nhật hợp lệ")
-    if "po_number" in values and not db.query(PurchaseOrder).filter_by(po_number=values["po_number"]).first():
-        raise HTTPException(404, "Không tìm thấy PO")
+    purchase_order = None
+    if "po_number" in values:
+        purchase_order = db.query(PurchaseOrder).filter_by(po_number=values.pop("po_number")).first()
+        if not purchase_order:
+            raise HTTPException(404, "Không tìm thấy PO")
     if "receipt_number" in values and db.query(GoodsReceipt).filter(GoodsReceipt.receipt_number == values["receipt_number"], GoodsReceipt.id != receipt_id).first():
         raise HTTPException(409, "Số phiếu nhập đã tồn tại")
+    lines = values.pop("lines", None)
     for key, value in values.items():
         setattr(row, key, value)
+    if purchase_order is not None:
+        row.purchase_order = purchase_order
+        row.po_id = purchase_order.id
+        row.po_number = purchase_order.po_number
+    if lines is not None:
+        try:
+            sync_goods_receipt_lines(row, lines)
+        except ValueError as exc:
+            db.rollback()
+            raise HTTPException(422, str(exc)) from exc
     record_audit(db, user, "goods_receipt.update", "goods_receipt", row.id, ",".join(sorted(values)))
     db.commit(); db.refresh(row)
     return {"id": row.id, "receipt_number": row.receipt_number, "po_number": row.po_number,
@@ -185,20 +249,29 @@ async def import_ledger(kind: str, file: UploadFile = File(...), db: Session = D
             elif kind == "purchase-orders":
                 key = str(row.get("po_number", "")).strip()
                 if not key or db.query(PurchaseOrder).filter_by(po_number=key).first(): skipped += 1; continue
+                supplier_tax_code = str(row.get("supplier_tax_code", "")).strip()
+                supplier = db.query(Supplier).filter_by(tax_code=supplier_tax_code).first()
+                if supplier is None: skipped += 1; continue
                 raw_lines = row.get("lines_json", row.get("lines", ""))
                 lines = json.loads(raw_lines) if isinstance(raw_lines, str) and raw_lines.strip() else []
                 if not isinstance(lines, list): skipped += 1; continue
-                db.add(PurchaseOrder(po_number=key, supplier_tax_code=str(row.get("supplier_tax_code", "")),
-                                    total_amount=float(row.get("total_amount", 0) or 0), lines=lines))
+                po = PurchaseOrder(po_number=key, supplier_id=supplier.id, supplier_tax_code=supplier.tax_code,
+                                   total_amount=float(row.get("total_amount", 0) or 0))
+                sync_purchase_order_lines(po, lines)
+                db.add(po)
             else:
                 key = str(row.get("receipt_number", "")).strip()
                 if not key or db.query(GoodsReceipt).filter_by(receipt_number=key).first(): skipped += 1; continue
                 po_number = str(row.get("po_number", "")).strip()
-                if not db.query(PurchaseOrder).filter_by(po_number=po_number).first(): skipped += 1; continue
+                purchase_order = db.query(PurchaseOrder).filter_by(po_number=po_number).first()
+                if not purchase_order: skipped += 1; continue
                 raw_lines = row.get("lines_json", row.get("lines", ""))
                 lines = json.loads(raw_lines) if isinstance(raw_lines, str) and raw_lines.strip() else []
                 if not isinstance(lines, list): skipped += 1; continue
-                db.add(GoodsReceipt(receipt_number=key, po_number=po_number, lines=lines))
+                receipt = GoodsReceipt(receipt_number=key, po_number=po_number, po_id=purchase_order.id,
+                                       purchase_order=purchase_order)
+                sync_goods_receipt_lines(receipt, lines)
+                db.add(receipt)
             created += 1
         except (TypeError, ValueError, json.JSONDecodeError):
             skipped += 1
@@ -209,17 +282,16 @@ async def import_ledger(kind: str, file: UploadFile = File(...), db: Session = D
 
 @router.post("/clear-all")
 def clear_all(db: Session = Depends(get_db), _: User = Depends(require_roles("admin"))):
-    from app.models import Invoice
-    db.query(Invoice).delete()
+    from app.models import GoodsReceiptItem, Invoice, PurchaseOrderItem
+    from app.services.invoice_lifecycle import delete_invoice_dependents
+
+    for (invoice_id,) in db.query(Invoice.id).all():
+        delete_invoice_dependents(db, invoice_id)
+    db.query(Invoice).delete(synchronize_session=False)
+    db.query(GoodsReceiptItem).delete(synchronize_session=False)
     db.query(GoodsReceipt).delete()
+    db.query(PurchaseOrderItem).delete(synchronize_session=False)
     db.query(PurchaseOrder).delete()
     db.query(Supplier).delete()
     db.commit()
     return {"message": "Đã xóa toàn bộ dữ liệu đơn hàng và hóa đơn."}
-
-
-@router.post("/seed-sample")
-def seed_sample(db: Session = Depends(get_db), _: User = Depends(require_roles("admin"))):
-    from app.seed import seed
-    seed()
-    return {"message": "Đã nạp lại bộ dữ liệu mẫu thành công."}

@@ -1,0 +1,32 @@
+USE `invoice_reconciliation`;
+
+CREATE TABLE IF NOT EXISTS invoices (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	original_name VARCHAR(255) NOT NULL,
+	stored_path VARCHAR(500) NOT NULL,
+	mime_type VARCHAR(100) NOT NULL,
+	sha256 VARCHAR(64),
+	status VARCHAR(32) NOT NULL,
+	seller_supplier_id INTEGER,
+	po_id INTEGER,
+	po_reference_text VARCHAR(80) NOT NULL,
+	seller_tax_code VARCHAR(32) NOT NULL,
+	buyer_tax_code VARCHAR(32) NOT NULL,
+	invoice_number VARCHAR(80) NOT NULL,
+	invoice_date VARCHAR(32) NOT NULL,
+	total_amount NUMERIC(18, 2),
+	currency_code VARCHAR(3) NOT NULL,
+	subtotal_amount NUMERIC(18, 2),
+	tax_amount NUMERIC(18, 2),
+	ocr_text TEXT NOT NULL,
+	ocr_blocks JSON NOT NULL,
+	ocr_confidence FLOAT,
+	warnings JSON NOT NULL,
+	po_number VARCHAR(80) NOT NULL,
+	review_note TEXT NOT NULL,
+	created_at DATETIME NOT NULL,
+	updated_at DATETIME NOT NULL,
+	PRIMARY KEY (id),
+	CONSTRAINT fk_invoices_seller_supplier FOREIGN KEY(seller_supplier_id) REFERENCES suppliers (id),
+	CONSTRAINT fk_invoices_po FOREIGN KEY(po_id) REFERENCES purchase_orders (id)
+);

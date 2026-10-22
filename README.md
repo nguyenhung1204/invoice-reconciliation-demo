@@ -9,7 +9,7 @@ Demo for Vietnamese VAT invoice intake, accountant review, PO/GR reconciliation,
 3. Nhấp đúp `start-demo.bat`. Lần đầu Docker build image và khởi tạo MySQL, có thể mất vài phút.
 4. Mở [http://localhost:8000](http://localhost:8000). Đăng nhập bằng `admin@gmail.com` / `admin`, `ketoan@gmail.com` / `admin`, hoặc `ketoantruong@gmail.com` / `admin`.
 
-Demo nạp đúng một hóa đơn `HD_001.pdf`, thông tin hóa đơn lấy từ PDF, cùng nhà cung cấp và hai dòng hàng tương ứng. PO `PO-DEMO-HD001` và GR `GR-DEMO-HD001` được dựng để minh họa phần trước khi nhận hóa đơn; chúng **không phải chứng từ PO/GR gốc**. Hóa đơn ở trạng thái cần kế toán rà soát. File PDF được đưa vào repo theo yêu cầu chia sẻ demo của nhóm.
+Demo nạp đúng một hóa đơn `HD_001.pdf`, thông tin hóa đơn lấy từ PDF, cùng nhà cung cấp và hai dòng hàng tương ứng. PO `PO-DEMO-HD001` và GR `GR-DEMO-HD001` được dựng để minh họa phần trước khi nhận hóa đơn; chúng **không phải chứng từ PO/GR gốc**. Hóa đơn ở trạng thái cần kế toán rà soát. File PDF được đưa vào repo theo yêu cầu chia sẻ demo của nhóm. PO, GR, dòng hóa đơn, hồ sơ OCR, bản rà soát, kết quả đối soát và quyết định duyệt dùng các bảng quan hệ trong cùng database `invoice_reconciliation`.
 
 Nếu không dùng file `.bat`, mở PowerShell ở thư mục repo và chạy:
 
@@ -18,7 +18,7 @@ Copy-Item .env.docker.example .env
 docker compose up --build --wait -d
 ```
 
-Mở `/docs` để xem API. Dùng `docker compose ps` để xem trạng thái; dừng app bằng `docker compose down`. Dữ liệu trong các Docker volume được giữ lại. Bản demo chuyển sang một volume MySQL mới riêng cho HD_001 để không trộn 20 hóa đơn cũ; volume database cũ được giữ nguyên và không dùng trong demo mới. Không chạy `docker compose down -v` nếu muốn giữ dữ liệu.
+Mở `/docs` để xem API. Dùng `docker compose ps` để xem trạng thái; dừng app bằng `docker compose down`. Dữ liệu trong các Docker volume được giữ lại. Khi app khởi động, migration có phiên bản cập nhật schema ngay trong database đang cấu hình, giữ nguyên ID và dữ liệu hóa đơn hiện có; HD_001 vẫn là dữ liệu seed duy nhất của demo mới. Không chạy `docker compose down -v` nếu muốn giữ dữ liệu.
 
 Các tài khoản/mật khẩu mẫu chỉ dùng thử cục bộ. Trước khi chia sẻ app qua mạng, hãy sửa mật khẩu và `SECRET_KEY` trong `.env`. OCR dùng PaddleOCR CPU; lần chạy OCR đầu có thể cần tải model. Trọng số fine-tune không nằm trong repo.
 
@@ -68,7 +68,7 @@ backend/app/services/     OCR, normalization, reconciliation, reporting
 backend/app/models/       SQLAlchemy entities
 backend/tests/            backend tests
 data/demo/public/         HD_001.pdf and its minimal demo manifest
-data/schema/              normalized reference DDL, one file per table
+data/schema/              DDL generated from runtime models, one file per table
 data/docs/                database dictionary
 data/scripts/              schema generator
 docker-compose.yml        MySQL + app services and persistent volumes
@@ -79,14 +79,16 @@ backend/Dockerfile        application image
 
 - The included public invoice is the real `HD_001.pdf`, shared intentionally for this team demo. The manifest contains only fields needed to seed the UI and matching scenario; it omits the source file's address, phone, lookup code, and tax-authority code.
 - The PO/GR rows are illustrative data derived from the invoice and are clearly labeled as such in the invoice review note.
-- `data/schema/` is a separate normalized reference schema; it is not a migration and does not change the current SQLAlchemy runtime schema.
+- `data/schema/tables/` is generated from the same SQLAlchemy metadata the API uses. The startup migration updates the configured demo database in place; there is no second demo schema to import manually.
 - Other real invoices, `.env`, local database files, upload history, and research labels remain excluded from Git.
 
 ## Tests
 
 ```powershell
 cd backend
-..\.venv-demo\Scripts\python.exe -m pytest tests -q
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pytest tests -q
 cd ..
 node --test frontend/tests/invoice_preview.test.mjs
 ```

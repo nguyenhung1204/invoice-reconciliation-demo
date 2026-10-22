@@ -1,0 +1,10 @@
+USE `invoice_reconciliation`;
+
+CREATE TABLE IF NOT EXISTS suppliers (
+	id INTEGER NOT NULL AUTO_INCREMENT,
+	tax_code VARCHAR(32) NOT NULL,
+	name VARCHAR(255) NOT NULL,
+	email VARCHAR(255) NOT NULL,
+	created_at DATETIME NOT NULL,
+	PRIMARY KEY (id)
+);

@@ -9,8 +9,9 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from app.models import GoodsReceipt, Invoice, PurchaseOrder, Supplier
+from app.models import GoodsReceipt, Invoice, InvoiceFile, PurchaseOrder, Supplier
 from app.services.invoice_lines import sync_invoice_items
+from app.services.procurement_lines import sync_goods_receipt_lines, sync_purchase_order_lines
 
 
 def _sha256(path: Path) -> str:
@@ -104,50 +105,76 @@ def seed_public_demo(
             )
             db.add(supplier)
             counts["suppliers_created"] += 1
+        db.flush()
 
         purchase_order = db.query(PurchaseOrder).filter_by(
             po_number=purchase_order_data["po_number"]
         ).first()
+        if purchase_order is not None and (
+            purchase_order.supplier_id != supplier.id
+            or purchase_order.supplier_tax_code != supplier_data["tax_code"]
+        ):
+            raise ValueError("Demo PO supplier does not match the manifest supplier")
         if purchase_order is None:
             purchase_order = PurchaseOrder(
                 po_number=purchase_order_data["po_number"],
                 supplier_tax_code=purchase_order_data["supplier_tax_code"],
+                supplier_id=supplier.id,
                 total_amount=purchase_order_data["total_amount"],
                 status=purchase_order_data.get("status", "open"),
-                lines=purchase_order_data["lines"],
             )
             db.add(purchase_order)
+            db.flush()
+            sync_purchase_order_lines(purchase_order, purchase_order_data["lines"])
             counts["purchase_orders_created"] += 1
+        elif not purchase_order.line_rows:
+            if purchase_order.supplier_id != supplier.id:
+                raise ValueError("Demo PO supplier does not match the manifest supplier")
+            sync_purchase_order_lines(purchase_order, purchase_order_data["lines"])
 
         receipt = db.query(GoodsReceipt).filter_by(
             receipt_number=receipt_data["receipt_number"]
         ).first()
+        if receipt is not None and receipt.po_id != purchase_order.id:
+            raise ValueError("Demo GR does not reference the manifest PO")
         if receipt is None:
             receipt = GoodsReceipt(
                 receipt_number=receipt_data["receipt_number"],
                 po_number=receipt_data["po_number"],
-                lines=receipt_data["lines"],
+                po_id=purchase_order.id,
             )
             db.add(receipt)
+            db.flush()
+            sync_goods_receipt_lines(receipt, receipt_data["lines"])
             counts["goods_receipts_created"] += 1
+        elif not receipt.line_rows:
+            if receipt.po_id != purchase_order.id:
+                raise ValueError("Demo GR does not reference the manifest PO")
+            sync_goods_receipt_lines(receipt, receipt_data["lines"])
 
         invoice = db.query(Invoice).filter_by(sha256=checksum).first()
+        if invoice is not None and (
+            invoice.seller_supplier_id != supplier.id or invoice.po_id != purchase_order.id
+        ):
+            raise ValueError("Demo invoice supplier or PO does not match the manifest")
         if invoice is None:
             invoice = Invoice(
                 original_name=fixture.name,
                 stored_path=str(destination.resolve()),
                 mime_type="application/pdf",
                 sha256=checksum,
+                seller_supplier_id=supplier.id,
+                po_id=purchase_order.id,
                 status="needs_review",
                 seller_tax_code=invoice_data["seller_tax_code"],
                 buyer_tax_code=invoice_data.get("buyer_tax_code", ""),
                 invoice_number=invoice_data["invoice_number"],
                 invoice_date=invoice_data["invoice_date"],
                 total_amount=invoice_data["total_amount"],
-                items=[],
                 ocr_text="",
                 warnings=[],
                 po_number=invoice_data["po_number"],
+                po_reference_text=invoice_data["po_number"],
                 review_note=invoice_data.get("review_note", ""),
             )
             db.add(invoice)
@@ -155,9 +182,22 @@ def seed_public_demo(
             sync_invoice_items(invoice, invoice_data["items"], source="demo_seed")
             counts["invoices_created"] += 1
             counts["invoice_items_created"] += len(invoice_data["items"])
-        elif not invoice.item_rows and not invoice.items:
+        elif not invoice.item_rows:
             sync_invoice_items(invoice, invoice_data["items"], source="demo_seed")
             counts["invoice_items_created"] += len(invoice_data["items"])
+
+        invoice_file = db.query(InvoiceFile).filter_by(sha256=checksum).first()
+        if invoice_file is None:
+            invoice_file = InvoiceFile(
+                invoice=invoice,
+                original_name=fixture.name,
+                relative_path=str(Path("demo") / fixture.name),
+                mime_type="application/pdf",
+                size_bytes=fixture.stat().st_size,
+                sha256=checksum,
+                is_primary=True,
+            )
+            db.add(invoice_file)
 
         db.commit()
         return counts

@@ -8,11 +8,12 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.api import auth, invoices, ledger, reports
 from app.core.config import settings
-from app.core.database import Base, SessionLocal, engine
+from app.core.database import SessionLocal, engine
 from app.core.security import hash_password
 from app.models import User
 from app.services.scheduler import generate_daily_reconciliation_report, scan_inbox_folder
 from app.services.demo_seed import seed_public_demo
+from app.migrations.runner import upgrade_schema
 
 scheduler = BackgroundScheduler(daemon=True)
 
@@ -22,7 +23,7 @@ def initialize():
         with engine.connect() as connection:
             connection.exec_driver_sql("PRAGMA journal_mode=WAL")
             connection.commit()
-    Base.metadata.create_all(bind=engine)
+    upgrade_schema(engine)
     with SessionLocal() as db:
         initial_users = (
             (settings.admin_email, settings.admin_password, "admin"),
