@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import DateTime, Float, JSON, String, Text
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -70,6 +70,109 @@ class Invoice(Base):
     review_note: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    item_rows: Mapped[list["InvoiceItem"]] = relationship(
+        back_populates="invoice", cascade="all, delete-orphan", order_by="InvoiceItem.line_number"
+    )
+    dataset_memberships: Mapped[list["InvoiceDatasetMembership"]] = relationship(
+        back_populates="invoice", cascade="all, delete-orphan"
+    )
+
+
+class InvoiceItem(Base):
+    """Normalized invoice line table; Invoice.items remains for old rows only."""
+
+    __tablename__ = "invoice_items"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    invoice_id: Mapped[int] = mapped_column(
+        ForeignKey("invoices.id", ondelete="CASCADE"), index=True
+    )
+    line_number: Mapped[int] = mapped_column(Integer)
+    item_description: Mapped[str] = mapped_column(Text)
+    unit: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    quantity: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)
+    unit_price: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+    line_total: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+    data_source: Mapped[str] = mapped_column(String(32), default="manual")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    invoice: Mapped[Invoice] = relationship(back_populates="item_rows")
+    __table_args__ = (UniqueConstraint("invoice_id", "line_number", name="uq_invoice_item_line"),)
+
+
+class InvoiceDataset(Base):
+    __tablename__ = "datasets"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    dataset_code: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    title: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_file: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_sheet: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    memberships: Mapped[list["InvoiceDatasetMembership"]] = relationship(
+        back_populates="dataset", cascade="all, delete-orphan"
+    )
+
+
+class InvoiceDatasetMembership(Base):
+    __tablename__ = "dataset_invoices"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    dataset_id: Mapped[int] = mapped_column(ForeignKey("datasets.id", ondelete="CASCADE"), index=True)
+    invoice_id: Mapped[int] = mapped_column(ForeignKey("invoices.id", ondelete="CASCADE"), index=True)
+    source_record_id: Mapped[str] = mapped_column(String(100))
+    source_image: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_workbook: Mapped[str] = mapped_column(String(255))
+    source_sheet: Mapped[str] = mapped_column(String(255))
+    source_row: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    dataset: Mapped[InvoiceDataset] = relationship(back_populates="memberships")
+    invoice: Mapped[Invoice] = relationship(back_populates="dataset_memberships")
+    ground_truth_fields: Mapped[list["InvoiceGroundTruthField"]] = relationship(
+        back_populates="membership", cascade="all, delete-orphan"
+    )
+    item_labels: Mapped[list["DatasetInvoiceItemLabel"]] = relationship(
+        back_populates="membership", cascade="all, delete-orphan"
+    )
+    __table_args__ = (
+        UniqueConstraint("dataset_id", "invoice_id", name="uq_dataset_invoice"),
+        UniqueConstraint("dataset_id", "source_record_id", name="uq_dataset_source_record"),
+    )
+
+
+class InvoiceGroundTruthField(Base):
+    __tablename__ = "invoice_ground_truth_fields"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    dataset_invoice_id: Mapped[int] = mapped_column(
+        ForeignKey("dataset_invoices.id", ondelete="CASCADE"), index=True
+    )
+    field_key: Mapped[str] = mapped_column(String(80))
+    raw_value: Mapped[str] = mapped_column(Text)
+    normalized_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_column: Mapped[str] = mapped_column(String(255))
+    annotation_status: Mapped[str] = mapped_column(String(32), default="labeled")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    membership: Mapped[InvoiceDatasetMembership] = relationship(back_populates="ground_truth_fields")
+    __table_args__ = (
+        UniqueConstraint("dataset_invoice_id", "field_key", name="uq_invoice_ground_truth_field"),
+    )
+
+
+class DatasetInvoiceItemLabel(Base):
+    __tablename__ = "dataset_invoice_item_labels"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    dataset_invoice_id: Mapped[int] = mapped_column(
+        ForeignKey("dataset_invoices.id", ondelete="CASCADE"), index=True
+    )
+    line_number: Mapped[int] = mapped_column(Integer)
+    item_description: Mapped[str] = mapped_column(Text)
+    unit: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    quantity: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)
+    unit_price: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+    annotation_status: Mapped[str] = mapped_column(String(32), default="description_only")
+    source_column: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    membership: Mapped[InvoiceDatasetMembership] = relationship(back_populates="item_labels")
+    __table_args__ = (
+        UniqueConstraint("dataset_invoice_id", "line_number", name="uq_dataset_invoice_item_label"),
+    )
 
 
 class AuditEvent(Base):

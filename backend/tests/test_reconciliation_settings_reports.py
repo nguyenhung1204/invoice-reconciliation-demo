@@ -72,3 +72,22 @@ def test_daily_report_job_and_download_route(api):
     response = client.get("/api/reports/reconciliation.csv")
     assert response.status_code == 200
     assert "invoice_id" in response.text and "MATH_ERROR" in response.text
+
+
+def test_dashboard_excludes_archived_invoices(api):
+    client, factory, _ = api
+    with factory() as db:
+        db.add_all([
+            Invoice(original_name="invoice-1.pdf", stored_path="invoice-1.pdf", status="needs_review",
+                    seller_tax_code="SUPPLIER-001"),
+            Invoice(original_name="invoice-2.pdf", stored_path="invoice-2.pdf", status="archived",
+                    seller_tax_code="SUPPLIER-001"),
+        ])
+        db.commit()
+
+    dashboard = client.get("/api/reports/dashboard").json()
+
+    assert dashboard["total"] == 1
+    assert dashboard["by_status"] == {"needs_review": 1}
+    assert [row["name"] for row in dashboard["recent"]] == ["invoice-1.pdf"]
+    assert dashboard["top_suppliers"][0]["invoices"] == 1

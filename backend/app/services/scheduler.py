@@ -50,7 +50,7 @@ def generate_daily_reconciliation_report(report_date: date | None = None) -> Pat
         writer = csv.writer(target)
         writer.writerow(["invoice_id", "file_name", "invoice_number", "invoice_date", "seller_tax_code",
                          "total_amount", "po_number", "status", "warning_codes", "warning_messages", "created_at"])
-        for row in db.query(Invoice).order_by(Invoice.created_at.asc()):
+        for row in db.query(Invoice).filter(Invoice.status != "archived").order_by(Invoice.created_at.asc()):
             warnings = row.warnings or []
             writer.writerow([row.id, row.original_name, row.invoice_number, row.invoice_date,
                              row.seller_tax_code, row.total_amount, row.po_number, row.status,

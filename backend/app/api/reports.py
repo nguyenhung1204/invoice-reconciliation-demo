@@ -48,14 +48,15 @@ def reconciliation_csv(_: User = Depends(current_user)):
 
 @router.get("/dashboard")
 def dashboard(db: Session = Depends(get_db), _: User = Depends(current_user)):
-    total = db.query(func.count(Invoice.id)).scalar() or 0
-    counts = dict(db.query(Invoice.status, func.count(Invoice.id)).group_by(Invoice.status).all())
-    recent = db.query(Invoice).order_by(Invoice.created_at.desc()).limit(6).all()
+    active = db.query(Invoice).filter(Invoice.status != "archived")
+    total = active.with_entities(func.count(Invoice.id)).scalar() or 0
+    counts = dict(active.with_entities(Invoice.status, func.count(Invoice.id)).group_by(Invoice.status).all())
+    recent = active.order_by(Invoice.created_at.desc()).limit(6).all()
     today = datetime.now(timezone.utc).date()
     days = [today - timedelta(days=n) for n in range(6, -1, -1)]
     weekly = {day.isoformat(): {"matched": 0, "mismatch": 0, "review": 0} for day in days}
     warnings = Counter()
-    for row in db.query(Invoice).all():
+    for row in active.all():
         created_day = row.created_at.date() if row.created_at else None
         bucket = weekly.get(created_day.isoformat()) if created_day else None
         if bucket is not None:
@@ -64,7 +65,7 @@ def dashboard(db: Session = Depends(get_db), _: User = Depends(current_user)):
         for warning in row.warnings or []:
             warnings[warning.get("code", "OTHER")] += 1
     supplier_names = {s.tax_code: s.name for s in db.query(Supplier).all()}
-    supplier_counts = Counter(x.seller_tax_code for x in db.query(Invoice).filter(Invoice.seller_tax_code != "").all())
+    supplier_counts = Counter(x.seller_tax_code for x in active.filter(Invoice.seller_tax_code != "").all())
     top_suppliers = [{"tax_code": code, "name": supplier_names.get(code, "Chưa có trong sổ NCC"), "invoices": n}
                      for code, n in supplier_counts.most_common(5)]
     return {"total": total, "by_status": counts,
@@ -104,7 +105,7 @@ def audit_log(limit: int = 100, db: Session = Depends(get_db), _: User = Depends
 def export_csv(db: Session = Depends(get_db), _: User = Depends(current_user)):
     buffer = io.StringIO(); writer = csv.writer(buffer)
     writer.writerow(["id", "seller_tax_code", "buyer_tax_code", "invoice_number", "invoice_date", "total_amount", "status", "po_number"])
-    for x in db.query(Invoice).order_by(Invoice.created_at.desc()):
+    for x in db.query(Invoice).filter(Invoice.status != "archived").order_by(Invoice.created_at.desc()):
         writer.writerow([x.id, x.seller_tax_code, x.buyer_tax_code, x.invoice_number, x.invoice_date, x.total_amount, x.status, x.po_number])
     return StreamingResponse(iter([buffer.getvalue()]), media_type="text/csv; charset=utf-8",
                              headers={"Content-Disposition": "attachment; filename=invoice-report.csv"})
@@ -119,7 +120,7 @@ def export_xlsx(db: Session = Depends(get_db), _: User = Depends(current_user)):
     headers = ["ID", "MST bên bán", "MST bên mua", "Số hóa đơn", "Ngày", "Tổng tiền", "Trạng thái", "PO"]
     ws.append(headers)
     for c in ws[1]: c.font = Font(bold=True, color="FFFFFF"); c.fill = PatternFill("solid", fgColor="243B53")
-    for x in db.query(Invoice).order_by(Invoice.created_at.desc()):
+    for x in db.query(Invoice).filter(Invoice.status != "archived").order_by(Invoice.created_at.desc()):
         ws.append([x.id, x.seller_tax_code, x.buyer_tax_code, x.invoice_number, x.invoice_date, x.total_amount, x.status, x.po_number])
     ws.freeze_panes = "A2"; ws.auto_filter.ref = ws.dimensions
     for col in ws.columns:

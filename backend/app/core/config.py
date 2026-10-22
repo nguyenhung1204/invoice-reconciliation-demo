@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     currency_tolerance: float = 1.0
     item_similarity_threshold: int = 90
     inbox_scan_dir: str = ""
+    load_demo_seed: bool = False
+    demo_invoice_fixture_path: str = "../data/demo/public/HD_001.pdf"
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

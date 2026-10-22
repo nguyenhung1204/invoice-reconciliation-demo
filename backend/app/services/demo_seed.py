@@ -1,0 +1,168 @@
+"""Seed a single, internally matched public invoice demo scenario."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import shutil
+from pathlib import Path
+
+from sqlalchemy.orm import Session
+
+from app.models import GoodsReceipt, Invoice, PurchaseOrder, Supplier
+from app.services.invoice_lines import sync_invoice_items
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _load_manifest(fixture: Path) -> dict:
+    manifest_path = fixture.with_suffix(".json")
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"Public demo invoice metadata not found: {manifest_path}")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Invalid public demo invoice metadata: {manifest_path}") from exc
+
+    required = ("supplier", "invoice", "purchase_order", "goods_receipt")
+    if not isinstance(manifest, dict) or any(not isinstance(manifest.get(key), dict) for key in required):
+        raise ValueError(f"Demo metadata must include object sections: {', '.join(required)}")
+
+    supplier = manifest["supplier"]
+    invoice = manifest["invoice"]
+    purchase_order = manifest["purchase_order"]
+    receipt = manifest["goods_receipt"]
+    if not supplier.get("tax_code") or not supplier.get("name"):
+        raise ValueError("Demo metadata requires supplier tax_code and name")
+    if invoice.get("seller_tax_code") != supplier["tax_code"]:
+        raise ValueError("Demo invoice seller tax code must match the supplier")
+    if purchase_order.get("supplier_tax_code") != supplier["tax_code"]:
+        raise ValueError("Demo PO supplier tax code must match the supplier")
+    if not invoice.get("po_number") or invoice["po_number"] != purchase_order.get("po_number"):
+        raise ValueError("Demo invoice and PO must use the same PO number")
+    if receipt.get("po_number") != purchase_order.get("po_number"):
+        raise ValueError("Demo GR must reference the demo PO")
+    if not isinstance(invoice.get("items"), list) or not invoice["items"]:
+        raise ValueError("Demo invoice must include at least one item line")
+    if not isinstance(purchase_order.get("lines"), list) or not purchase_order["lines"]:
+        raise ValueError("Demo PO must include at least one item line")
+    if not isinstance(receipt.get("lines"), list) or not receipt["lines"]:
+        raise ValueError("Demo GR must include at least one received item line")
+    return manifest
+
+
+def seed_public_demo(
+    db: Session,
+    *,
+    upload_dir: str,
+    fixture_path: str,
+) -> dict[str, int]:
+    """Create missing records from the PDF's JSON manifest, without overwriting edits."""
+    fixture = Path(fixture_path)
+    if not fixture.is_file():
+        raise FileNotFoundError(f"Public demo invoice fixture not found: {fixture}")
+
+    manifest = _load_manifest(fixture)
+    supplier_data = manifest["supplier"]
+    invoice_data = manifest["invoice"]
+    purchase_order_data = manifest["purchase_order"]
+    receipt_data = manifest["goods_receipt"]
+    checksum = _sha256(fixture)
+    destination = Path(upload_dir) / "demo" / fixture.name
+    copied_fixture = False
+    counts = {
+        "suppliers_created": 0,
+        "purchase_orders_created": 0,
+        "goods_receipts_created": 0,
+        "invoices_created": 0,
+        "invoice_items_created": 0,
+    }
+
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists():
+            if _sha256(destination) != checksum:
+                raise FileExistsError(
+                    f"Refusing to replace a different demo invoice at {destination}"
+                )
+        else:
+            shutil.copy2(fixture, destination)
+            copied_fixture = True
+
+        supplier = db.query(Supplier).filter_by(tax_code=supplier_data["tax_code"]).first()
+        if supplier is None:
+            supplier = Supplier(
+                tax_code=supplier_data["tax_code"],
+                name=supplier_data["name"],
+                email=supplier_data.get("email", ""),
+            )
+            db.add(supplier)
+            counts["suppliers_created"] += 1
+
+        purchase_order = db.query(PurchaseOrder).filter_by(
+            po_number=purchase_order_data["po_number"]
+        ).first()
+        if purchase_order is None:
+            purchase_order = PurchaseOrder(
+                po_number=purchase_order_data["po_number"],
+                supplier_tax_code=purchase_order_data["supplier_tax_code"],
+                total_amount=purchase_order_data["total_amount"],
+                status=purchase_order_data.get("status", "open"),
+                lines=purchase_order_data["lines"],
+            )
+            db.add(purchase_order)
+            counts["purchase_orders_created"] += 1
+
+        receipt = db.query(GoodsReceipt).filter_by(
+            receipt_number=receipt_data["receipt_number"]
+        ).first()
+        if receipt is None:
+            receipt = GoodsReceipt(
+                receipt_number=receipt_data["receipt_number"],
+                po_number=receipt_data["po_number"],
+                lines=receipt_data["lines"],
+            )
+            db.add(receipt)
+            counts["goods_receipts_created"] += 1
+
+        invoice = db.query(Invoice).filter_by(sha256=checksum).first()
+        if invoice is None:
+            invoice = Invoice(
+                original_name=fixture.name,
+                stored_path=str(destination.resolve()),
+                mime_type="application/pdf",
+                sha256=checksum,
+                status="needs_review",
+                seller_tax_code=invoice_data["seller_tax_code"],
+                buyer_tax_code=invoice_data.get("buyer_tax_code", ""),
+                invoice_number=invoice_data["invoice_number"],
+                invoice_date=invoice_data["invoice_date"],
+                total_amount=invoice_data["total_amount"],
+                items=[],
+                ocr_text="",
+                warnings=[],
+                po_number=invoice_data["po_number"],
+                review_note=invoice_data.get("review_note", ""),
+            )
+            db.add(invoice)
+            db.flush()
+            sync_invoice_items(invoice, invoice_data["items"], source="demo_seed")
+            counts["invoices_created"] += 1
+            counts["invoice_items_created"] += len(invoice_data["items"])
+        elif not invoice.item_rows and not invoice.items:
+            sync_invoice_items(invoice, invoice_data["items"], source="demo_seed")
+            counts["invoice_items_created"] += len(invoice_data["items"])
+
+        db.commit()
+        return counts
+    except Exception:
+        db.rollback()
+        if copied_fixture:
+            destination.unlink(missing_ok=True)
+        raise

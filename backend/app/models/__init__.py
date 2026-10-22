@@ -1,3 +1,27 @@
-from app.models.entities import AuditEvent, GoodsReceipt, Invoice, PurchaseOrder, Supplier, User
+from app.models.entities import (
+    AuditEvent,
+    DatasetInvoiceItemLabel,
+    GoodsReceipt,
+    Invoice,
+    InvoiceDataset,
+    InvoiceDatasetMembership,
+    InvoiceGroundTruthField,
+    InvoiceItem,
+    PurchaseOrder,
+    Supplier,
+    User,
+)
 
-__all__ = ["AuditEvent", "GoodsReceipt", "Invoice", "PurchaseOrder", "Supplier", "User"]
+__all__ = [
+    "AuditEvent",
+    "DatasetInvoiceItemLabel",
+    "GoodsReceipt",
+    "Invoice",
+    "InvoiceDataset",
+    "InvoiceDatasetMembership",
+    "InvoiceGroundTruthField",
+    "InvoiceItem",
+    "PurchaseOrder",
+    "Supplier",
+    "User",
+]

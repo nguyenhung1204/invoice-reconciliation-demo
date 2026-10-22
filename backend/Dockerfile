@@ -21,6 +21,8 @@ RUN if [ "$INSTALL_OCR" = "1" ]; then apt-get update \
 
 COPY backend/app ./app
 COPY frontend /app/frontend
+COPY data/demo/public/HD_001.pdf /app/demo-data/HD_001.pdf
+COPY data/demo/public/HD_001.json /app/demo-data/HD_001.json
 
 RUN mkdir -p /app/backend/data/uploads \
     && useradd --create-home --uid 10001 appuser \

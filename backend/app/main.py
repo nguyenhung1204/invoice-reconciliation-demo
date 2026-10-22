@@ -12,6 +12,7 @@ from app.core.database import Base, SessionLocal, engine
 from app.core.security import hash_password
 from app.models import User
 from app.services.scheduler import generate_daily_reconciliation_report, scan_inbox_folder
+from app.services.demo_seed import seed_public_demo
 
 scheduler = BackgroundScheduler(daemon=True)
 
@@ -35,6 +36,12 @@ def initialize():
                 created = True
         if created:
             db.commit()
+        if settings.load_demo_seed:
+            seed_public_demo(
+                db,
+                upload_dir=settings.upload_dir,
+                fixture_path=settings.demo_invoice_fixture_path,
+            )
 
 
 @asynccontextmanager
@@ -79,6 +86,7 @@ app.include_router(reports.router, prefix="/api")
 frontend_dir = Path(__file__).resolve().parents[2] / "frontend"
 assets_dir = (frontend_dir / "assets") if (frontend_dir / "assets").exists() else (frontend_dir / "src")
 app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+app.mount("/legacy-assets", StaticFiles(directory=frontend_dir / "src"), name="legacy-assets")
 
 
 @app.get("/health")
@@ -103,6 +111,15 @@ def sample_pdf():
 
 
 @app.get("/")
+def live_frontend():
+    return FileResponse(frontend_dir / "index_old.html")
+
+
+@app.get("/mock")
+def mock_frontend():
+    return FileResponse(frontend_dir / "index.html")
+
+
 @app.get("/{full_path:path}")
 def index(full_path: str = ""):
     if full_path and not full_path.startswith("api/"):

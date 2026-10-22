@@ -1,6 +1,7 @@
 from rapidfuzz.fuzz import ratio
 
 from app.services.normalization import normalize_text
+from app.services.invoice_lines import invoice_items_for_api
 from app.services.reconciliation_settings import get_reconciliation_settings
 
 
@@ -28,7 +29,7 @@ def reconcile(invoice, purchase_order=None, goods_receipt=None, amount_tolerance
         if invoice.total_amount is not None and abs(invoice.total_amount - purchase_order.total_amount) > amount_tolerance:
             warnings.append({"code": "AMOUNT_MISMATCH", "message": "Tổng tiền hóa đơn lệch PO"})
         expected = purchase_order.lines or []
-        actual = invoice.items or []
+        actual = invoice_items_for_api(invoice)
         if expected and not actual:
             warnings.append({"code": "INVOICE_ITEMS_MISSING", "message": "Hóa đơn chưa có dòng mặt hàng để đối chiếu PO"})
         for item in actual:
@@ -79,9 +80,10 @@ def reconcile(invoice, purchase_order=None, goods_receipt=None, amount_tolerance
                             warnings.append({"code": "DELIVERY_WRONG", "message": f"Số lượng nhận vượt PO: {item.get('name', '')}"})
     if goods_receipt and not goods_receipt.lines:
         warnings.append({"code": "EMPTY_GR", "message": "Phiếu nhập kho chưa có dòng hàng"})
-    if invoice.total_amount is not None and invoice.items:
+    invoice_items = invoice_items_for_api(invoice)
+    if invoice.total_amount is not None and invoice_items:
         line_amounts = []
-        for item in invoice.items:
+        for item in invoice_items:
             line_amount = _number(item.get("amount"))
             if line_amount is None:
                 unit_price, quantity = _number(item.get("unit_price")), _number(item.get("quantity"))

@@ -4,14 +4,15 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError, OperationalError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import current_user, require_roles
-from app.models import AuditEvent, GoodsReceipt, Invoice, PurchaseOrder, User
+from app.models import AuditEvent, GoodsReceipt, Invoice, InvoiceDatasetMembership, PurchaseOrder, User
 from app.services.normalization import extract_fields
+from app.services.invoice_lines import invoice_items_for_api, sync_invoice_items
 from app.services.ocr import OCRUnavailable, recognize_file
 from app.services.reconciliation import reconcile
 from app.services.reconciliation_settings import get_reconciliation_settings
@@ -35,9 +36,10 @@ def serialize(row: Invoice):
     return {"id": row.id, "original_name": row.original_name, "status": row.status,
             "seller_tax_code": row.seller_tax_code, "buyer_tax_code": row.buyer_tax_code,
             "invoice_number": row.invoice_number, "invoice_date": row.invoice_date,
-            "total_amount": row.total_amount, "items": row.items or [], "ocr_text": row.ocr_text,
+            "total_amount": row.total_amount, "items": invoice_items_for_api(row), "ocr_text": row.ocr_text,
             "ocr_blocks": row.ocr_blocks or [], "ocr_confidence": row.ocr_confidence, "warnings": row.warnings or [], "po_number": row.po_number,
-            "review_note": row.review_note, "created_at": row.created_at.isoformat()}
+            "review_note": row.review_note, "datasets": [m.dataset.dataset_code for m in row.dataset_memberships],
+            "created_at": row.created_at.isoformat()}
 
 
 def audit(db, user, action, entity_type, entity_id, detail=""):
@@ -46,8 +48,15 @@ def audit(db, user, action, entity_type, entity_id, detail=""):
 
 @router.get("")
 def list_invoices(status_filter: str = "", db: Session = Depends(get_db), _: User = Depends(current_user)):
-    query = db.query(Invoice)
-    if status_filter: query = query.filter(Invoice.status == status_filter)
+    query = db.query(Invoice).options(
+        selectinload(Invoice.dataset_memberships).selectinload(InvoiceDatasetMembership.dataset)
+    )
+    if status_filter:
+        query = query.filter(Invoice.status == status_filter)
+    else:
+        # Archived invoices remain available for audit and evaluation datasets, but
+        # should not clutter the day-to-day intake queue.
+        query = query.filter(Invoice.status != "archived")
     return [serialize(row) for row in query.order_by(Invoice.created_at.desc()).limit(300)]
 
 
@@ -76,8 +85,9 @@ async def upload_invoice(file: UploadFile = File(...), db: Session = Depends(get
         ocr_result = await run_in_threadpool(recognize_file, str(stored_path))
         text, confidence, blocks = ocr_result["text"], ocr_result["confidence"], ocr_result.get("blocks", [])
         fields = extract_fields(text)
-        for key in ("seller_tax_code", "buyer_tax_code", "invoice_date", "total_amount", "items"):
+        for key in ("seller_tax_code", "buyer_tax_code", "invoice_number", "invoice_date", "total_amount", "items"):
             setattr(row, key, fields[key])
+        sync_invoice_items(row, fields["items"], source="ocr")
         status = "needs_review" if confidence is None or confidence < get_reconciliation_settings()["ocr_confidence_min"] else "ocr_done"
         if not text.strip():
             warnings.append({"code": "OCR_EMPTY", "message": "OCR không đọc được chữ; kiểm tra file hoặc chạy nhận dạng lại."})
@@ -117,8 +127,9 @@ async def retry_ocr(invoice_id: int, db: Session = Depends(get_db), user: User =
         row.ocr_blocks = result.get("blocks", [])
         row.ocr_confidence = result["confidence"]
         fields = extract_fields(row.ocr_text)
-        for key in ("seller_tax_code", "buyer_tax_code", "invoice_date", "total_amount", "items"):
+        for key in ("seller_tax_code", "buyer_tax_code", "invoice_number", "invoice_date", "total_amount", "items"):
             setattr(row, key, fields[key])
+        sync_invoice_items(row, fields["items"], source="ocr")
         row.status = "needs_review" if row.ocr_confidence is None or row.ocr_confidence < get_reconciliation_settings()["ocr_confidence_min"] else "ocr_done"
         if not row.ocr_text.strip():
             warnings.append({"code": "OCR_EMPTY", "message": "OCR không đọc được chữ; kiểm tra chất lượng file."})
@@ -165,7 +176,10 @@ def review_invoice(invoice_id: int, body: ReviewIn, db: Session = Depends(get_db
     if not row: raise HTTPException(404, "Không tìm thấy hóa đơn")
     if row.status == "approved" and user.role != "admin":
         raise HTTPException(409, "Hóa đơn đã phê duyệt; chỉ Admin mới được mở khóa chỉnh sửa")
-    for key, value in body.model_dump().items(): setattr(row, key, value)
+    for key, value in body.model_dump().items():
+        if key != "items":
+            setattr(row, key, value)
+    sync_invoice_items(row, body.items, source="manual_review")
     row.status = "reviewed"
     audit(db, user, "invoice.review", "invoice", row.id, body.review_note[:500])
     try:

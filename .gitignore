@@ -10,3 +10,20 @@ backend/data/*
 !backend/data/.gitkeep
 data/*
 !data/.gitkeep
+# Track schema documentation and reproducible generators, but keep source
+# invoices, tax identifiers, and generated real-data seeds local.
+!data/README.md
+!data/schema/
+!data/schema/**
+data/schema/ERD.mmd
+!data/docs/
+!data/docs/**
+!data/scripts/
+!data/scripts/**
+# The HD_001 invoice PDF is intentionally public for the shared demo at the user's request.
+# Other source invoices, tax data, and generated seed files stay ignored.
+!data/demo/
+data/demo/*
+!data/demo/public/
+!data/demo/public/**
+data/**/__pycache__/

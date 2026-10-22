@@ -1329,12 +1329,39 @@ a {
 
 .invoice-render {
   background: #fff;
-  color: #111;
-  font-family: "Times New Roman", serif;
-  font-size: 11px;
-  padding: 24px 28px;
   min-height: 600px;
   position: relative;
+  padding: 0;
+  transform-origin: top left;
+}
+
+.invoice-source-frame {
+  display: block;
+  width: 100%;
+  height: calc(100vh - 300px);
+  min-height: 600px;
+  border: 0;
+  background: #fff;
+}
+
+.invoice-source-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.invoice-preview-message {
+  display: grid;
+  min-height: 600px;
+  place-items: center;
+  padding: 24px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.invoice-preview-message.error {
+  color: var(--red);
 }
 
 .inv-header {

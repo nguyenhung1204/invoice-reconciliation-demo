@@ -12,12 +12,14 @@ let currentUser = JSON.parse(localStorage.getItem('user') || 'null');
 let currentView = 'dashboard';
 let currentMatchingInvoice = null;
 let allInvoices = [];
+let archivedInvoices = [];
 let allPOs = [];
 let allGRs = [];
 let allSuppliers = [];
 let workerInterval = null;
 let workerCountdown = 300; // 5 min in seconds
 let zoomLevel = 100;
+let currentInvoiceFileUrl = null;
 let bboxVisible = true;
 let qrVisible = false;
 let poLineCount = 0;
@@ -52,11 +54,26 @@ function toast(msg, type = 'info', duration = 4000) {
 
 // ── Formatters ──────────────────────────────────────
 const fmtMoney = n => n != null ? Number(n).toLocaleString('vi-VN') + ' ₫' : '—';
-const fmtDate = s => s ? new Date(s).toLocaleDateString('vi-VN') : '—';
+const fmtDate = s => {
+  if (!s) return '—';
+  const dayFirst = String(s).match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  const isoDate = String(s).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  let date;
+  if (dayFirst) {
+    date = new Date(Number(dayFirst[3]), Number(dayFirst[2]) - 1, Number(dayFirst[1]));
+    if (date.getFullYear() !== Number(dayFirst[3]) || date.getMonth() !== Number(dayFirst[2]) - 1 || date.getDate() !== Number(dayFirst[1])) return '—';
+  } else if (isoDate) {
+    date = new Date(Number(isoDate[1]), Number(isoDate[2]) - 1, Number(isoDate[3]));
+    if (date.getFullYear() !== Number(isoDate[1]) || date.getMonth() !== Number(isoDate[2]) - 1 || date.getDate() !== Number(isoDate[3])) return '—';
+  } else {
+    date = new Date(s);
+  }
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString('vi-VN');
+};
 const fmtDatetime = s => s ? new Date(s).toLocaleString('vi-VN') : '—';
 const statusLabel = {
   needs_review: 'Cần xác nhận', ocr_done: 'OCR hoàn tất', reviewed: 'Đã rà soát',
-  matched: 'Khớp hoàn toàn', mismatch: 'Phát hiện lệch', approved: 'Đã phê duyệt',
+  matched: 'Khớp hoàn toàn', mismatch: 'Phát hiện lệch', approved: 'Đã phê duyệt', archived: 'Đã lưu trữ',
   uploaded: 'Vừa tải lên', processing: 'Đang xử lý'
 };
 const roleLabel = { admin: 'Quản trị viên', accountant: 'Kế toán viên', chief_accountant: 'Kế toán trưởng' };
@@ -109,7 +126,7 @@ function navigateTo(view) {
 
   const titles = {
     dashboard: 'Tổng quan & Giám sát',
-    queue: 'Tiếp nhận & Hàng đợi',
+    queue: 'Tiếp nhận và quản lý hóa đơn',
     matching: 'Đối soát 3 bên — Split Screen',
     masterdata: 'Dữ liệu PO & Phiếu kho',
     reports: 'Báo cáo & Cấu hình'
@@ -262,6 +279,12 @@ function startWorkerCountdown() {
 // ── Queue ────────────────────────────────────────────
 async function loadQueue() {
   try {
+    const statusFilter = document.getElementById('queue-status-filter').value;
+    if (statusFilter === 'archived') {
+      archivedInvoices = await api('/invoices?status_filter=archived') || [];
+      renderQueueTable(archivedInvoices);
+      return;
+    }
     const data = await api('/invoices');
     allInvoices = data || [];
     renderQueueTable(allInvoices);
@@ -450,82 +473,43 @@ async function loadMatchingInvoice(id) {
   } catch (e) { toast('Lỗi tải hóa đơn: ' + e.message, 'error'); }
 }
 
-function renderInvoiceDocument(inv) {
+async function renderInvoiceDocument(inv) {
   const placeholder = document.getElementById('doc-placeholder');
   const wrap = document.getElementById('invoice-render-wrap');
   const render = document.getElementById('invoice-render');
   placeholder.classList.add('hidden');
   wrap.classList.remove('hidden');
-
-  const items = inv.items || [];
-  const subtotal = inv.total_amount ? inv.total_amount / 1.1 : 0;
-  const vat = inv.total_amount ? inv.total_amount - subtotal : 0;
-
   render.style.transform = `scale(${zoomLevel / 100})`;
-  render.innerHTML = `
-    <div class="inv-header">
-      <div class="inv-republic">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM · Độc lập - Tự do - Hạnh phúc</div>
-      <div class="inv-title">HÓA ĐƠN GIÁ TRỊ GIA TĂNG</div>
-      <div class="inv-serial">
-        Ký hiệu: <strong>${inv.original_name?.split('.')[0]?.slice(0, 16) || '01GTKT0/001'}</strong> &nbsp;|&nbsp;
-        Số: <strong>${inv.invoice_number || '—'}</strong> &nbsp;|&nbsp;
-        Ngày: <strong>${inv.invoice_date || fmtDate(inv.created_at)}</strong>
-      </div>
-    </div>
-    <div class="inv-parties">
-      <div>
-        <div class="inv-party-label">Đơn vị bán hàng</div>
-        <div class="inv-party-value">MST: ${inv.seller_tax_code || '—'}</div>
-        <div style="font-size:9px;color:#555;margin-top:3px">Địa chỉ: (Xem hóa đơn gốc)</div>
-        <div style="font-size:9px;color:#555">Số TK: —</div>
-      </div>
-      <div>
-        <div class="inv-party-label">Đơn vị mua hàng</div>
-        <div class="inv-party-value">MST: ${inv.buyer_tax_code || '—'}</div>
-        <div style="font-size:9px;color:#555;margin-top:3px">Hình thức TT: Chuyển khoản</div>
-        <div style="font-size:9px;color:#555">Đồng tiền: VNĐ</div>
-      </div>
-    </div>
-    <table class="inv-table">
-      <thead>
-        <tr>
-          <th style="width:4%">STT</th>
-          <th style="text-align:left">Tên hàng hóa, dịch vụ</th>
-          <th style="width:6%">ĐVT</th>
-          <th style="width:8%">Số lượng</th>
-          <th style="width:14%">Đơn giá</th>
-          <th style="width:14%">Thành tiền</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${items.length ? items.map((it, i) => `
-          <tr>
-            <td style="text-align:center">${i + 1}</td>
-            <td style="text-align:left">${it.name || it.description || '—'}</td>
-            <td>${it.unit || 'Cái'}</td>
-            <td>${it.quantity ?? '—'}</td>
-            <td>${it.unit_price != null ? Number(it.unit_price).toLocaleString('vi-VN') : '—'}</td>
-            <td>${it.amount != null ? Number(it.amount).toLocaleString('vi-VN') : '—'}</td>
-          </tr>`).join('') :
-          `<tr><td colspan="6" style="text-align:center;color:#888;font-size:9px">Chưa có dữ liệu mặt hàng từ OCR</td></tr>`}
-      </tbody>
-    </table>
-    <div class="inv-footer">
-      <div class="inv-total-row"><span>Tiền hàng (chưa thuế GTGT):</span><span>${inv.total_amount ? Number(subtotal.toFixed(0)).toLocaleString('vi-VN') : '—'}</span></div>
-      <div class="inv-total-row"><span>Thuế suất GTGT: 10%</span><span>${inv.total_amount ? Number(vat.toFixed(0)).toLocaleString('vi-VN') : '—'}</span></div>
-      <div class="inv-total-row bold"><span>Tổng cộng tiền thanh toán:</span><span>${fmtMoney(inv.total_amount)}</span></div>
-      <div style="font-size:9px;margin-top:4px;font-style:italic">Số tiền bằng chữ: ${numberToVietnamese(inv.total_amount)} đồng chẵn.</div>
-    </div>
-    <div class="inv-signatures">
-      <div>
-        <div class="inv-sig-title">ĐẠI DIỆN BÊN BÁN<br>(Ký, đóng dấu, ghi rõ họ tên)</div>
-        <div class="dig-sig-seal">🔐 Chữ ký số điện tử<br>SHA256-RSA · Đã xác thực<br>Hash: ${(inv.sha256 || 'N/A').slice(0, 16)}...</div>
-      </div>
-      <div>
-        <div class="inv-sig-title">ĐẠI DIỆN BÊN MUA<br>(Ký, ghi rõ họ tên)</div>
-        <div style="color:#888;font-size:9px;margin-top:20px">Chờ phê duyệt...</div>
-      </div>
-    </div>`;
+  render.innerHTML = '<div class="invoice-preview-message">Đang tải hóa đơn gốc…</div>';
+
+  try {
+    const response = await fetch(`${API}/invoices/${inv.id}/file`, {
+      headers: { 'Authorization': `Bearer ${authToken}` }
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || `HTTP ${response.status}`);
+    }
+
+    const file = await response.blob();
+    if (currentMatchingInvoice?.id !== inv.id) return;
+    if (currentInvoiceFileUrl) URL.revokeObjectURL(currentInvoiceFileUrl);
+    currentInvoiceFileUrl = URL.createObjectURL(file);
+
+    const contentType = (file.type || response.headers.get('content-type') || '').toLowerCase();
+    if (contentType.includes('pdf')) {
+      render.innerHTML = `<iframe class="invoice-source-frame" title="Hóa đơn gốc" src="${currentInvoiceFileUrl}#toolbar=0&navpanes=0"></iframe>`;
+    } else if (contentType.startsWith('image/')) {
+      render.innerHTML = `<img class="invoice-source-image" alt="Hóa đơn gốc" src="${currentInvoiceFileUrl}">`;
+    } else {
+      throw new Error('Định dạng tệp hóa đơn không được hỗ trợ.');
+    }
+  } catch (error) {
+    if (currentMatchingInvoice?.id !== inv.id) return;
+    render.innerHTML = '<div class="invoice-preview-message error"></div>';
+    render.firstElementChild.textContent = `Không tải được hóa đơn gốc: ${error.message}`;
+    toast(`Lỗi tải hóa đơn gốc: ${error.message}`, 'error');
+  }
 }
 
 function renderLineItems(inv) {
@@ -1061,8 +1045,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // Queue search/filter
-  document.getElementById('queue-search')?.addEventListener('input', () => renderQueueTable(allInvoices));
-  document.getElementById('queue-status-filter')?.addEventListener('change', () => renderQueueTable(allInvoices));
+  document.getElementById('queue-search')?.addEventListener('input', () => {
+    const rows = document.getElementById('queue-status-filter').value === 'archived' ? archivedInvoices : allInvoices;
+    renderQueueTable(rows);
+  });
+  document.getElementById('queue-status-filter')?.addEventListener('change', loadQueue);
 
   // Matching select
   document.getElementById('match-select')?.addEventListener('change', e => {

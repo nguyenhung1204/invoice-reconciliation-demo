@@ -117,6 +117,22 @@ def test_invoice_delete_chief_can_delete_unapproved(api):
         assert client.delete(f"/api/invoices/{invoice_id}").status_code == 200
 
 
+def test_invoice_queue_hides_archived_records_unless_requested(api):
+    client, factory, _ = api
+    with factory() as db:
+        db.add_all([
+            Invoice(original_name="invoice-test-1.pdf", stored_path="invoice-test-1.pdf", status="needs_review"),
+            Invoice(original_name="HD_002.pdf", stored_path="hd002.pdf", status="archived"),
+        ])
+        db.commit()
+
+    active = client.get("/api/invoices").json()
+    archived = client.get("/api/invoices", params={"status_filter": "archived"}).json()
+
+    assert [row["original_name"] for row in active] == ["invoice-test-1.pdf"]
+    assert [row["original_name"] for row in archived] == ["HD_002.pdf"]
+
+
 def test_po_patch_delete_validation_and_audit(api):
     client, factory, app = api
     with factory() as db:

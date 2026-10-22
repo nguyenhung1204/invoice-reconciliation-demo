@@ -1,0 +1,69 @@
+{
+  "supplier": {
+    "tax_code": "0108075931",
+    "name": "Công ty TNHH Thương Mại Tổng hợp HTV"
+  },
+  "invoice": {
+    "seller_tax_code": "0108075931",
+    "buyer_tax_code": "5000863573",
+    "invoice_number": "1C22THT / 506572",
+    "invoice_date": "2022-10-09",
+    "total_amount": 780000,
+    "po_number": "PO-DEMO-HD001",
+    "review_note": "Các trường hóa đơn theo PDF HD_001. PO-DEMO-HD001 và GR-DEMO-HD001 là chứng từ minh họa dựng theo hóa đơn, không phải chứng từ gốc.",
+    "items": [
+      {
+        "name": "CHUỘT KHÔNG DÂY LOGITECH M331 ĐEN- IMEI: MA.260.B",
+        "unit": "Cái",
+        "quantity": 1,
+        "unit_price": 300000,
+        "amount": 330000
+      },
+      {
+        "name": "TAI NGHE KHÔNG DÂY XIAOMI REDMI BUDS 3 LITE TRẮNG- IMEI: TN.BT.13.W",
+        "unit": "Cái",
+        "quantity": 1,
+        "unit_price": 409091,
+        "amount": 450000
+      }
+    ]
+  },
+  "purchase_order": {
+    "po_number": "PO-DEMO-HD001",
+    "supplier_tax_code": "0108075931",
+    "total_amount": 780000,
+    "status": "open",
+    "lines": [
+      {
+        "name": "CHUỘT KHÔNG DÂY LOGITECH M331 ĐEN- IMEI: MA.260.B",
+        "unit": "Cái",
+        "quantity": 1,
+        "unit_price": 300000,
+        "amount": 330000
+      },
+      {
+        "name": "TAI NGHE KHÔNG DÂY XIAOMI REDMI BUDS 3 LITE TRẮNG- IMEI: TN.BT.13.W",
+        "unit": "Cái",
+        "quantity": 1,
+        "unit_price": 409091,
+        "amount": 450000
+      }
+    ]
+  },
+  "goods_receipt": {
+    "receipt_number": "GR-DEMO-HD001",
+    "po_number": "PO-DEMO-HD001",
+    "lines": [
+      {
+        "name": "CHUỘT KHÔNG DÂY LOGITECH M331 ĐEN- IMEI: MA.260.B",
+        "unit": "Cái",
+        "quantity": 1
+      },
+      {
+        "name": "TAI NGHE KHÔNG DÂY XIAOMI REDMI BUDS 3 LITE TRẮNG- IMEI: TN.BT.13.W",
+        "unit": "Cái",
+        "quantity": 1
+      }
+    ]
+  }
+}

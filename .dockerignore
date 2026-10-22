@@ -10,4 +10,12 @@ backend/.venv
 backend/.venv-demo
 backend/data
 data
+!data/
+data/*
+!data/demo/
+data/demo/*
+!data/demo/public/
+data/demo/public/*
+!data/demo/public/HD_001.pdf
+!data/demo/public/HD_001.json
 *.zip
