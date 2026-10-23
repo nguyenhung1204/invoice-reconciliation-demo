@@ -23,7 +23,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile
       args:
-        INSTALL_OCR: ${INSTALL_OCR:-0}
+        INSTALL_OCR: ${INSTALL_OCR:-1}
     restart: unless-stopped
     depends_on:
       db:

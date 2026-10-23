@@ -43,7 +43,7 @@ docker compose ps
 
 Open `http://localhost:8000` (API docs: `/docs`). Demo accounts are `admin@gmail.com`, `ketoan@gmail.com`, and `ketoantruong@gmail.com`; each starts with password `admin`. Change these credentials before exposing the app to a network.
 
-Stop with `docker compose down`; named volumes are preserved. `docker compose down -v` deletes the current demo database and uploaded files. OCR CPU support is enabled by default; set `INSTALL_OCR=0` in `.env` for a smaller manual-review image.
+Stop with `docker compose down`; named volumes are preserved. OCR CPU support is enabled by default. If the UI says `No module named 'paddleocr'`, set `INSTALL_OCR=1` in `.env` and rebuild with `docker compose up --build --wait -d` (or rerun `start-demo.bat`). If an older run still shows invoices such as `HD_031.pdf` or says the original PDF is missing, its database volume contains the previous demo data. To reload the single `HD_001` demo, make sure `.env` has `INSTALL_OCR=1`, run `docker compose down -v`, then run `start-demo.bat`. This reset deletes the local demo database, uploaded files, and cached OCR models, so use it only when those old demo records can be discarded.
 
 ## Run locally (SQLite)
 
@@ -56,7 +56,7 @@ Copy-Item .env.example .env
 uvicorn app.main:app --reload
 ```
 
-Open `http://127.0.0.1:8000`. Docker uses MySQL; local development uses SQLite. Without OCR dependencies, uploaded invoices remain in `needs_review` for manual entry.
+Open `http://127.0.0.1:8000`. Docker uses MySQL; local development uses SQLite. Without OCR dependencies, uploaded invoices remain in `needs_review` for manual entry. To enable OCR during a local Python run, install its CPU dependencies with `pip install -r requirements-ocr.txt` before starting the app.
 
 ## Project layout
 
