@@ -267,7 +267,11 @@ class ReconciliationLineAllocation(Base):
     __tablename__ = "reconciliation_line_allocations"
     allocation_id: Mapped[int] = mapped_column(primary_key=True)
     reconciliation_run_id: Mapped[int] = mapped_column(ForeignKey("reconciliation_runs.reconciliation_run_id"), index=True)
-    invoice_item_id: Mapped[int] = mapped_column(ForeignKey("invoice_items.id"), index=True)
+    # Keep superseded reconciliation snapshots when a review replaces its
+    # invoice lines. The allocation remains useful through its JSON snapshots.
+    invoice_item_id: Mapped[int | None] = mapped_column(
+        ForeignKey("invoice_items.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     po_item_id: Mapped[int | None] = mapped_column(ForeignKey("purchase_order_items.id"), nullable=True)
     gr_item_id: Mapped[int | None] = mapped_column(ForeignKey("goods_receipt_items.id"), nullable=True)
     allocated_quantity: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)

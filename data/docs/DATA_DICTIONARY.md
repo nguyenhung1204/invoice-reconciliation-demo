@@ -319,7 +319,7 @@ Ràng buộc: `uq_invoice_ground_truth_field`: `dataset_invoice_id`, `field_key`
 |---|---|---:|---|---|
 | `allocation_id` | `INTEGER` | không | PK | — |
 | `reconciliation_run_id` | `INTEGER` | không | FK → `reconciliation_runs.reconciliation_run_id` | — |
-| `invoice_item_id` | `INTEGER` | không | FK → `invoice_items.id` | — |
+| `invoice_item_id` | `INTEGER` | có | FK → `invoice_items.id` | — |
 | `po_item_id` | `INTEGER` | có | FK → `purchase_order_items.id` | — |
 | `gr_item_id` | `INTEGER` | có | FK → `goods_receipt_items.id` | — |
 | `allocated_quantity` | `NUMERIC(18, 4)` | có | — | — |

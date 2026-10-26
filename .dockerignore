@@ -1,6 +1,12 @@
 .git
 .venv
 .venv-demo
+**/node_modules
+**/dist
+**/.npm-cache
+frontend/react-app/.env
+frontend/react-app/.env.*.local
+mock-source
 __pycache__
 *.py[cod]
 .pytest_cache

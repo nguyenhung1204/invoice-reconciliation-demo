@@ -1,5 +1,23 @@
 # Invoice Reconciliation MVP
 
+## Current application routes
+
+- `/` serves the previous Main frontend by default. Set `PRIMARY_FRONTEND=react` (environment or `backend/.env`) to serve the React application in `frontend/react-app/` at `/` once acceptance is complete. Setting it back to `old` (or removing it) is the rollback; if the React build is missing, `/` falls back to Main.
+- `/old` keeps the previous Main frontend for reference and rollback.
+- `/mock` keeps the Legacy mock bundle during acceptance.
+- `/new` always serves the React build for acceptance testing.
+
+Docker builds the official React source and places its static assets into the FastAPI image. For local FastAPI runs, build the React app once before opening `/`:
+
+```powershell
+cd frontend/react-app
+npm ci
+npm run build
+cd ../..
+```
+
+The new UI stores its short-lived access token in tab-scoped `sessionStorage` and uses the same-origin `/api` prefix by default. Set `VITE_API_BASE_URL` at build time only when the API is hosted at a different base path.
+
 Demo for Vietnamese VAT invoice intake, accountant review, PO/GR reconciliation, and reporting. Docker Compose starts one FastAPI app and one MySQL database; the app seeds one ready-to-review invoice scenario on a fresh database.
 
 ## Chạy demo trên Windows

@@ -79,7 +79,8 @@ def test_upgrade_is_idempotent(tmp_path):
             assert connection.execute(text("SELECT COUNT(*) FROM purchase_order_items")).scalar_one() == 2
             assert connection.execute(text("SELECT COUNT(*) FROM goods_receipt_items")).scalar_one() == 2
             assert connection.execute(text("SELECT COUNT(*) FROM invoice_files")).scalar_one() == 1
-            assert connection.execute(text("SELECT COUNT(*) FROM schema_migrations")).scalar_one() == 1
+            revisions = set(connection.execute(text("SELECT revision FROM schema_migrations")).scalars())
+            assert revisions == {"0001_normalize_operational_data", "0002_preserve_reconciliation_snapshots"}
     finally:
         engine.dispose()
 

@@ -1,3 +1,11 @@
+FROM node:22-alpine AS frontend-builder
+
+WORKDIR /build/frontend/react-app
+COPY frontend/react-app/package.json frontend/react-app/package-lock.json ./
+RUN npm ci
+COPY frontend/react-app/ ./
+RUN npm run build
+
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -21,6 +29,7 @@ RUN if [ "$INSTALL_OCR" = "1" ]; then apt-get update \
 
 COPY backend/app ./app
 COPY frontend /app/frontend
+COPY --from=frontend-builder /build/frontend/react-app/dist /app/frontend/react-app/dist
 COPY data/demo/public/HD_001.pdf /app/demo-data/HD_001.pdf
 COPY data/demo/public/HD_001.json /app/demo-data/HD_001.json
 

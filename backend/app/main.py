@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -88,6 +88,12 @@ frontend_dir = Path(__file__).resolve().parents[2] / "frontend"
 assets_dir = (frontend_dir / "assets") if (frontend_dir / "assets").exists() else (frontend_dir / "src")
 app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 app.mount("/legacy-assets", StaticFiles(directory=frontend_dir / "src"), name="legacy-assets")
+react_app_dist = frontend_dir / "react-app" / "dist"
+app.mount(
+    "/react-app-assets",
+    StaticFiles(directory=react_app_dist, check_dir=False),
+    name="react-app-assets",
+)
 
 
 @app.get("/health")
@@ -113,12 +119,28 @@ def sample_pdf():
 
 @app.get("/")
 def live_frontend():
-    return FileResponse(frontend_dir / "index_old.html")
+    target = react_app_dist / "index.html"
+    if target.is_file():
+        return FileResponse(target)
+    raise HTTPException(404, "Giao diện React chưa được build.")
+
+
+@app.get("/old")
+def old_removed():
+    raise HTTPException(404, "Đường dẫn /old đã bị xóa hoàn toàn khỏi hệ thống.")
 
 
 @app.get("/mock")
 def mock_frontend():
     return FileResponse(frontend_dir / "index.html")
+
+
+@app.get("/new")
+def migration_candidate_frontend():
+    target = react_app_dist / "index.html"
+    if target.is_file():
+        return FileResponse(target)
+    raise HTTPException(404, "React migration candidate has not been built yet.")
 
 
 @app.get("/{full_path:path}")
