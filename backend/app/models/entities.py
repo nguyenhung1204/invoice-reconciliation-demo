@@ -22,8 +22,11 @@ class User(Base):
 class Supplier(Base):
     __tablename__ = "suppliers"
     id: Mapped[int] = mapped_column(primary_key=True)
+    supplier_code: Mapped[str | None] = mapped_column(String(80), unique=True, nullable=True)
     tax_code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(255))
+    address: Mapped[str] = mapped_column(String(500), default="")
+    phone: Mapped[str] = mapped_column(String(40), default="")
     email: Mapped[str] = mapped_column(String(255), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     purchase_orders: Mapped[list["PurchaseOrder"]] = relationship(back_populates="supplier")
@@ -37,8 +40,13 @@ class PurchaseOrder(Base):
     supplier_tax_code: Mapped[str] = mapped_column(String(32), index=True)  # source-document snapshot for the existing API
     total_amount: Mapped[float] = mapped_column(Numeric(18, 2), default=0)
     status: Mapped[str] = mapped_column(String(32), default="open")
+    order_date: Mapped[str] = mapped_column(String(10), default="")
+    expected_delivery_date: Mapped[str] = mapped_column(String(10), default="")
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    employee_code: Mapped[str] = mapped_column(String(80), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     supplier: Mapped[Supplier] = relationship(back_populates="purchase_orders")
+    created_by_user: Mapped[User | None] = relationship()
     line_rows: Mapped[list["PurchaseOrderItem"]] = relationship(
         back_populates="purchase_order", cascade="all, delete-orphan", order_by="PurchaseOrderItem.line_number"
     )
@@ -66,6 +74,8 @@ class GoodsReceipt(Base):
     po_id: Mapped[int] = mapped_column(ForeignKey("purchase_orders.id", name="fk_goods_receipts_po"), index=True)
     po_number: Mapped[str] = mapped_column(String(80), index=True)  # source-document snapshot for the existing API
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    received_by: Mapped[str] = mapped_column(String(255), default="")
+    warehouse_location: Mapped[str] = mapped_column(String(255), default="")
     purchase_order: Mapped[PurchaseOrder] = relationship(back_populates="goods_receipts")
     line_rows: Mapped[list["GoodsReceiptItem"]] = relationship(
         back_populates="goods_receipt", cascade="all, delete-orphan", order_by="GoodsReceiptItem.line_number"
@@ -74,7 +84,7 @@ class GoodsReceipt(Base):
     @property
     def lines(self) -> list[dict]:
         return [
-            {"name": row.item_description, "unit": row.unit, "quantity": float(row.quantity_received)}
+            {"name": row.item_description, "unit": row.unit, "quantity": float(row.quantity_received), "notes": row.notes or ""}
             for row in self.line_rows
         ]
 
@@ -91,8 +101,10 @@ class Invoice(Base):
     po_id: Mapped[int | None] = mapped_column(ForeignKey("purchase_orders.id", name="fk_invoices_po"), nullable=True, index=True)
     po_reference_text: Mapped[str] = mapped_column(String(80), default="")
     seller_tax_code: Mapped[str] = mapped_column(String(32), default="", index=True)
+    seller_name: Mapped[str] = mapped_column(String(500), default="")
     buyer_tax_code: Mapped[str] = mapped_column(String(32), default="")
     invoice_number: Mapped[str] = mapped_column(String(80), default="")
+    invoice_series: Mapped[str] = mapped_column(String(80), default="")
     invoice_date: Mapped[str] = mapped_column(String(32), default="")
     total_amount: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
     currency_code: Mapped[str] = mapped_column(String(3), default="VND")
@@ -148,7 +160,74 @@ class Product(Base):
     sku: Mapped[str | None] = mapped_column(String(80), unique=True, nullable=True)
     product_name: Mapped[str] = mapped_column(String(500))
     unit: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    category_id: Mapped[int | None] = mapped_column(ForeignKey("product_categories.id"), nullable=True, index=True)
+    cost_price: Mapped[float] = mapped_column(Numeric(18, 2), default=0)
+    selling_price: Mapped[float] = mapped_column(Numeric(18, 2), default=0)
+    stock_qty: Mapped[float] = mapped_column(Numeric(18, 4), default=0)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    category: Mapped["ProductCategory | None"] = relationship(back_populates="products")
+
+
+class ProductCategory(Base):
+    __tablename__ = "product_categories"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    products: Mapped[list[Product]] = relationship(back_populates="category")
+
+
+class Customer(Base):
+    __tablename__ = "customers"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    phone: Mapped[str] = mapped_column(String(40), default="")
+    address: Mapped[str] = mapped_column(String(500), default="")
+    email: Mapped[str] = mapped_column(String(255), default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Employee(Base):
+    __tablename__ = "employees"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    full_name: Mapped[str] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(120), default="Kế toán viên")
+    phone: Mapped[str] = mapped_column(String(40), default="")
+    email: Mapped[str] = mapped_column(String(255), default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ReconciliationSetting(Base):
+    __tablename__ = "reconciliation_settings"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    currency_tolerance: Mapped[float] = mapped_column(Numeric(18, 2))
+    item_similarity_threshold: Mapped[int] = mapped_column(Integer)
+    ocr_confidence_min: Mapped[float] = mapped_column(Numeric(7, 6))
+    rpa_scan_interval_minutes: Mapped[int] = mapped_column(Integer, default=5)
+    auto_alert_email: Mapped[bool] = mapped_column(Boolean, default=True)
+    auto_alert_telegram: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class AccountingVoucher(Base):
+    __tablename__ = "accounting_vouchers"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    voucher_number: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    voucher_type: Mapped[str] = mapped_column(String(8))
+    voucher_date: Mapped[str] = mapped_column(String(10))
+    related_party_name: Mapped[str] = mapped_column(String(255))
+    related_invoice_id: Mapped[int | None] = mapped_column(ForeignKey("invoices.id", ondelete="SET NULL"), nullable=True)
+    content: Mapped[str] = mapped_column(Text)
+    amount: Mapped[float] = mapped_column(Numeric(18, 2))
+    is_auto_generated: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -178,6 +257,7 @@ class GoodsReceiptItem(Base):
     item_description: Mapped[str] = mapped_column(Text)
     unit: Mapped[str | None] = mapped_column(String(80), nullable=True)
     quantity_received: Mapped[float] = mapped_column(Numeric(18, 4))
+    notes: Mapped[str] = mapped_column(Text, default="")
     goods_receipt: Mapped[GoodsReceipt] = relationship(back_populates="line_rows")
     purchase_order_item: Mapped[PurchaseOrderItem | None] = relationship()
     product: Mapped[Product | None] = relationship()

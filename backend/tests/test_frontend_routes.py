@@ -14,37 +14,36 @@ async def no_lifespan(_app):
 
 
 
-def test_root_serves_the_migrated_react_frontend_when_enabled(monkeypatch):
+def test_root_and_compatibility_routes_serve_the_same_react_frontend():
     from pathlib import Path
-    from app.core.config import settings
 
     dist = Path(__file__).resolve().parents[2] / "frontend" / "react-app" / "dist"
     if not (dist / "index.html").is_file():
         pytest.skip("React migration candidate has not been built")
 
-    monkeypatch.setattr(settings, "primary_frontend", "react")
     original_lifespan = app.router.lifespan_context
     app.router.lifespan_context = no_lifespan
     try:
         with TestClient(app) as client:
-            response = client.get("/")
-            asset_paths = re.findall(r'(?:src|href)="(/react-app-assets/[^\"]+)"', response.text)
-            asset_responses = [client.get(path) for path in asset_paths]
-        assert response.status_code == 200
-        assert asset_paths
+            responses = [client.get(path) for path in ("/", "/mock", "/new", "/index.html")]
+            asset_paths = [re.findall(r'(?:src|href)="(/react-app-assets/[^\"]+)"', response.text) for response in responses]
+            asset_responses = [client.get(path) for paths in asset_paths for path in paths]
+        assert all(response.status_code == 200 for response in responses)
+        assert all(paths for paths in asset_paths)
+        assert all(paths == asset_paths[0] for paths in asset_paths)
         assert all(asset_response.status_code == 200 for asset_response in asset_responses)
     finally:
         app.router.lifespan_context = original_lifespan
 
 
-def test_mock_frontend_remains_available_separately():
+def test_unknown_api_route_returns_json_404_instead_of_legacy_html():
     original_lifespan = app.router.lifespan_context
     app.router.lifespan_context = no_lifespan
     try:
         with TestClient(app) as client:
-            response = client.get("/mock")
-        assert response.status_code == 200
-        assert '/assets/index-sIj6KsIT.js' in response.text
+            response = client.get("/api/not-a-real-route")
+        assert response.status_code == 404
+        assert response.headers["content-type"].startswith("application/json")
     finally:
         app.router.lifespan_context = original_lifespan
 

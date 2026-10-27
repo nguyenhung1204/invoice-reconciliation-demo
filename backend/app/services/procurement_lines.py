@@ -65,4 +65,5 @@ def sync_goods_receipt_lines(goods_receipt: GoodsReceipt, lines: list[dict]) -> 
             item_description=description,
             unit=str(line.get("unit") or "").strip() or None,
             quantity_received=quantity,
+            notes=str(line.get("notes") or "").strip(),
         ))

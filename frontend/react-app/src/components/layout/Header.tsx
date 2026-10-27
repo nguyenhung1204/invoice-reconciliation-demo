@@ -3,61 +3,66 @@ import {
   Bell,
   CheckCircle2,
   AlertTriangle,
-  Play,
-  Pause,
   RefreshCw,
   LogOut,
   Menu,
   ChevronDown,
 } from 'lucide-react';
 import { UserProfile, InvoiceRecord } from '../../types/index.ts';
-import { mockActions } from '../../services/api.ts';
+import { api, mockActions, WorkerStatusDTO } from '../../services/api.ts';
 
 interface HeaderProps {
   currentUser: UserProfile;
   invoices: InvoiceRecord[];
+  showScanAction: boolean;
   onSelectInvoice: (code: string) => void;
   onNavigateToMatching: () => void;
   onToggleMobileMenu?: () => void;
   onLogout: () => void;
-  onRoleChange?: (role: UserProfile['role']) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   currentUser,
   invoices,
+  showScanAction,
   onSelectInvoice,
   onNavigateToMatching,
   onToggleMobileMenu,
   onLogout,
-  onRoleChange,
 }) => {
-  const [rpaActive, setRpaActive] = useState<boolean>(true);
-  const [secondsUntilNextScan, setSecondsUntilNextScan] = useState<number>(274); // ~4m 34s
+  const [workerStatus, setWorkerStatus] = useState<WorkerStatusDTO | null>(null);
   const [showNotifications, setShowNotifications] = useState<boolean>(false);
   const [showUserDropdown, setShowUserDropdown] = useState<boolean>(false);
   const [isScanning, setIsScanning] = useState<boolean>(false);
-  const [scanMessage, setScanMessage] = useState<string | null>(null);
+  const [scanFeedback, setScanFeedback] = useState<{
+    status: 'success' | 'warning' | 'error';
+    message: string;
+  } | null>(null);
 
-  // Đếm ngược chu kỳ quét RPA
+  // Lấy trạng thái thực từ backend; không hiển thị bộ đếm giả ở giao diện.
   useEffect(() => {
-    if (!rpaActive) return;
-    const interval = setInterval(() => {
-      setSecondsUntilNextScan((prev) => {
-        if (prev <= 1) {
-          return 300; // Reset 5 phút
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [rpaActive]);
+    let active = true;
+    const loadWorkerStatus = async () => {
+      try {
+        const status = await api.getWorkerStatus();
+        if (active) setWorkerStatus(status);
+      } catch {
+        if (active) setWorkerStatus(null);
+      }
+    };
+    void loadWorkerStatus();
+    const interval = window.setInterval(() => void loadWorkerStatus(), 30_000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, []);
 
-  const formatCountdown = (totalSeconds: number) => {
-    const m = Math.floor(totalSeconds / 60);
-    const s = totalSeconds % 60;
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  };
+  useEffect(() => {
+    if (!scanFeedback) return;
+    const timeout = window.setTimeout(() => setScanFeedback(null), 6000);
+    return () => window.clearTimeout(timeout);
+  }, [scanFeedback]);
 
   // Danh sách các bất thường cần cảnh báo
   const pendingAnomalies = invoices.filter(
@@ -68,13 +73,11 @@ export const Header: React.FC<HeaderProps> = ({
     setIsScanning(true);
     try {
       const res = await mockActions.triggerRpaScan();
-      setScanMessage(res.message);
-      setTimeout(() => setScanMessage(null), 4000);
+      setScanFeedback({ status: res.status, message: res.message });
     } catch (e) {
       console.error(e);
     } finally {
       setIsScanning(false);
-      setSecondsUntilNextScan(300);
     }
   };
 
@@ -91,56 +94,40 @@ export const Header: React.FC<HeaderProps> = ({
           <Menu className="h-5 w-5" />
         </button>
 
-        <div className="hidden sm:flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-1.5 text-xs text-slate-700">
-          <span className="flex h-2.5 w-2.5 items-center justify-center">
-            <span
-              className={`h-2 w-2 rounded-full ${
-                rpaActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'
-              }`}
-            />
+        <div
+          title={workerStatus?.message || 'Đang lấy trạng thái thư mục nhận từ máy chủ'}
+          className="hidden sm:inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2 text-xs"
+          aria-live="polite"
+        >
+          <span className={`h-2 w-2 rounded-full ${workerStatus?.active ? 'bg-emerald-500' : workerStatus ? 'bg-amber-500' : 'bg-slate-400 animate-pulse'}`} />
+          <span className={`font-medium ${workerStatus?.active ? 'text-emerald-700' : 'text-slate-600'}`}>
+            {workerStatus ? (workerStatus.active ? 'Quét thư mục tự động' : 'Chưa cấu hình thư mục') : 'Đang kiểm tra nguồn nhận'}
           </span>
-          <span className="font-semibold text-slate-800">RPA Worker:</span>
-          <span
-            className={`font-medium ${
-              rpaActive ? 'text-emerald-700' : 'text-slate-500'
-            }`}
-          >
-            {rpaActive ? 'Đang hoạt động' : 'Tạm dừng'}
-          </span>
-          <span className="text-slate-300">|</span>
-          <span className="text-slate-500">
-            Quét kế tiếp:{' '}
-            <strong className="font-mono text-slate-800">
-              {rpaActive ? formatCountdown(secondsUntilNextScan) : '--:--'}
-            </strong>
-          </span>
-          <button
-            onClick={() => setRpaActive(!rpaActive)}
-            title={rpaActive ? 'Tạm dừng RPA' : 'Kích hoạt RPA'}
-            className="ml-1 cursor-pointer rounded p-1 text-slate-500 hover:bg-slate-200 hover:text-slate-800 transition-colors"
-          >
-            {rpaActive ? (
-              <Pause className="h-3.5 w-3.5" />
-            ) : (
-              <Play className="h-3.5 w-3.5" />
-            )}
-          </button>
         </div>
 
-        {/* Nút kích hoạt quét ngay */}
-        <button
-          onClick={handleTriggerScan}
-          disabled={isScanning}
-          className="cursor-pointer inline-flex items-center gap-1.5 rounded-lg bg-blue-50 border border-blue-200 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-50"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${isScanning ? 'animate-spin' : ''}`} />
-          {isScanning ? 'Đang quét hòm thư...' : 'Quét Email/SMB ngay'}
-        </button>
+        {showScanAction && currentUser.role === 'ADMIN' && (
+          <button
+            type="button"
+            onClick={handleTriggerScan}
+            disabled={isScanning}
+            className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isScanning ? 'animate-spin' : ''}`} />
+            {isScanning ? 'Đang quét...' : 'Quét thư mục'}
+          </button>
+        )}
 
-        {scanMessage && (
-          <span className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-md animate-fade-in flex items-center gap-1">
-            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-            {scanMessage}
+        {showScanAction && scanFeedback && (
+          <span
+            role={scanFeedback.status === 'error' ? 'alert' : 'status'}
+            className={`hidden xl:flex max-w-72 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs animate-fade-in ${
+              scanFeedback.status === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' :
+              scanFeedback.status === 'warning' ? 'border-amber-200 bg-amber-50 text-amber-800' :
+              'border-rose-200 bg-rose-50 text-rose-800'
+            }`}
+          >
+            {scanFeedback.status === 'success' ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0" /> : <AlertTriangle className="h-3.5 w-3.5 shrink-0" />}
+            <span className="truncate">{scanFeedback.message}</span>
           </span>
         )}
       </div>
@@ -251,22 +238,6 @@ export const Header: React.FC<HeaderProps> = ({
                   <div className="text-xs text-blue-600 font-medium mt-0.5">{currentUser.roleLabel}</div>
                   <div className="text-[10px] text-slate-400 truncate mt-0.5">{currentUser.department || 'Khối Tài chính & Vận hành'}</div>
                 </div>
-              </div>
-
-              <div className="py-2.5 px-1 space-y-2 text-xs">
-                <label className="block text-[11px] font-semibold text-slate-600" htmlFor="role-switcher">
-                  Vai trò thử nghiệm
-                </label>
-                <select
-                  id="role-switcher"
-                  value={currentUser.role}
-                  onChange={(e) => onRoleChange?.(e.target.value as any)}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-medium text-slate-800"
-                >
-                  <option value="ACCOUNTANT">Kế toán viên (Accountant)</option>
-                  <option value="CHIEF_ACCOUNTANT">Kế toán trưởng (Chief Accountant)</option>
-                  <option value="ADMIN">Quản trị viên (Admin)</option>
-                </select>
               </div>
 
               <div className="pt-2 border-t border-slate-100">

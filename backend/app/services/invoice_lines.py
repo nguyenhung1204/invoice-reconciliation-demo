@@ -36,6 +36,7 @@ def sync_invoice_items(invoice: Invoice, items: list[dict], *, source: str) -> N
                 unit=str(item.get("unit") or "").strip() or None,
                 quantity=_decimal(item.get("quantity")),
                 unit_price=_decimal(item.get("unit_price")),
+                tax_rate=_decimal(item.get("tax_rate")),
                 line_total=_decimal(item.get("amount", item.get("line_total"))),
                 data_source=source,
             )
@@ -56,6 +57,7 @@ def invoice_items_for_api(invoice: Invoice) -> list[dict]:
             "unit": row.unit,
             "quantity": float(row.quantity) if row.quantity is not None else None,
             "unit_price": float(row.unit_price) if row.unit_price is not None else None,
+            "tax_rate": float(row.tax_rate) if row.tax_rate is not None else None,
             "amount": float(row.line_total) if row.line_total is not None else None,
         }
         for row in rows

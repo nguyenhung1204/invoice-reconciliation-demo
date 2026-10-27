@@ -28,29 +28,6 @@ def make_client(role):
     return TestClient(app), engine, factory
 
 
-def test_accountant_cannot_clear_all():
-    client, engine, _ = make_client("accountant")
-    try:
-        response = client.post("/api/ledger/clear-all")
-        assert response.status_code == 403
-    finally:
-        engine.dispose()
-
-
-def test_admin_can_clear_all():
-    client, engine, factory = make_client("admin")
-    try:
-        with factory() as db:
-            db.add(Supplier(tax_code="1234567890", name="Example"))
-            db.commit()
-        response = client.post("/api/ledger/clear-all")
-        assert response.status_code == 200
-        with factory() as db:
-            assert db.query(Supplier).count() == 0
-    finally:
-        engine.dispose()
-
-
 def test_legacy_fake_sample_seed_route_is_removed():
     client, engine, _ = make_client("admin")
     try:

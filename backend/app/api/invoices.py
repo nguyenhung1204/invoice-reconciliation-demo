@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import json
 from uuid import uuid4
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, selectinload
 from rapidfuzz.fuzz import ratio
@@ -35,19 +35,30 @@ ALLOWED = {"application/pdf", "image/jpeg", "image/png"}
 
 class ReviewIn(BaseModel):
     seller_tax_code: str = ""
+    seller_name: str = ""
+    invoice_series: str = ""
     buyer_tax_code: str = ""
     invoice_number: str = ""
     invoice_date: str = ""
+    subtotal_amount: float | None = None
+    tax_amount: float | None = None
     total_amount: float | None = None
     items: list[dict] = []
     po_number: str = ""
     review_note: str = ""
 
 
+class RejectIn(BaseModel):
+    reason: str = Field(min_length=1, max_length=2000)
+
+
 def serialize(row: Invoice):
     return {"id": row.id, "original_name": row.original_name, "status": row.status,
-            "seller_tax_code": row.seller_tax_code, "buyer_tax_code": row.buyer_tax_code,
-            "invoice_number": row.invoice_number, "invoice_date": row.invoice_date,
+            "seller_tax_code": row.seller_tax_code, "seller_name": row.seller_name,
+            "buyer_tax_code": row.buyer_tax_code,
+            "invoice_number": row.invoice_number, "invoice_series": row.invoice_series,
+            "invoice_date": row.invoice_date,
+            "subtotal_amount": row.subtotal_amount, "tax_amount": row.tax_amount,
             "total_amount": row.total_amount, "items": invoice_items_for_api(row), "ocr_text": row.ocr_text,
             "ocr_blocks": row.ocr_blocks or [], "ocr_confidence": row.ocr_confidence, "warnings": row.warnings or [], "po_number": row.po_number,
             "review_note": row.review_note, "datasets": [m.dataset.dataset_code for m in row.dataset_memberships],
@@ -68,7 +79,7 @@ def record_ocr_attempt(db, invoice: Invoice, *, fields: dict, confidence: float 
         started_at=started_at,
         finished_at=datetime.now(timezone.utc),
         duration_seconds=duration,
-        config_json={"minimum_confidence": get_reconciliation_settings()["ocr_confidence_min"]},
+        config_json={"minimum_confidence": get_reconciliation_settings(db)["ocr_confidence_min"]},
     )
     db.add(run)
     db.flush()
@@ -87,9 +98,13 @@ def record_ocr_attempt(db, invoice: Invoice, *, fields: dict, confidence: float 
 def review_snapshot(invoice: Invoice) -> dict:
     return {
         "seller_tax_code": invoice.seller_tax_code,
+        "seller_name": invoice.seller_name,
+        "invoice_series": invoice.invoice_series,
         "buyer_tax_code": invoice.buyer_tax_code,
         "invoice_number": invoice.invoice_number,
         "invoice_date": invoice.invoice_date,
+        "subtotal_amount": float(invoice.subtotal_amount) if invoice.subtotal_amount is not None else None,
+        "tax_amount": float(invoice.tax_amount) if invoice.tax_amount is not None else None,
         "total_amount": float(invoice.total_amount) if invoice.total_amount is not None else None,
         "currency_code": invoice.currency_code,
         "po_id": invoice.po_id,
@@ -148,7 +163,7 @@ def _allocate_reconciliation_lines(db: Session, run: ReconciliationRun, invoice:
         return
 
     po_lines = list(po.line_rows)
-    threshold = get_reconciliation_settings()["item_similarity_threshold"]
+    threshold = get_reconciliation_settings(db)["item_similarity_threshold"]
     remaining_by_gr_line = {
         line.id: _as_decimal(line.quantity_received) or Decimal("0")
         for receipt in receipts for line in receipt.line_rows
@@ -293,7 +308,7 @@ async def upload_invoice(file: UploadFile = File(...), db: Session = Depends(get
             setattr(row, key, fields[key])
         sync_invoice_items(row, fields["items"], source="ocr")
         ocr_run_status = "succeeded"
-        status = "needs_review" if confidence is None or confidence < get_reconciliation_settings()["ocr_confidence_min"] else "ocr_done"
+        status = "needs_review" if confidence is None or confidence < get_reconciliation_settings(db)["ocr_confidence_min"] else "ocr_done"
         if not text.strip():
             warnings.append({"code": "OCR_EMPTY", "message": "OCR không đọc được chữ; kiểm tra file hoặc chạy nhận dạng lại."})
     except OCRUnavailable as exc:
@@ -359,7 +374,7 @@ async def retry_ocr(invoice_id: int, db: Session = Depends(get_db), user: User =
         sync_invoice_items(row, fields["items"], source="ocr")
         row.seller_supplier_id = db.query(Supplier.id).filter_by(tax_code=row.seller_tax_code).scalar()
         ocr_run_status = "succeeded"
-        row.status = "needs_review" if row.ocr_confidence is None or row.ocr_confidence < get_reconciliation_settings()["ocr_confidence_min"] else "ocr_done"
+        row.status = "needs_review" if row.ocr_confidence is None or row.ocr_confidence < get_reconciliation_settings(db)["ocr_confidence_min"] else "ocr_done"
         if not row.ocr_text.strip():
             warnings.append({"code": "OCR_EMPTY", "message": "OCR không đọc được chữ; kiểm tra chất lượng file."})
     except OCRUnavailable as exc:
@@ -417,6 +432,11 @@ def review_invoice(invoice_id: int, body: ReviewIn, db: Session = Depends(get_db
     if has_payment:
         raise HTTPException(409, "Hóa đơn đã có thanh toán; không thể sửa dữ liệu đã ghi nhận")
     values = body.model_dump()
+    # Older review clients do not send the newly editable tax totals. Preserve
+    # those stored values when the fields are omitted from their request.
+    for optional_total in ("subtotal_amount", "tax_amount"):
+        if optional_total not in body.model_fields_set:
+            values.pop(optional_total, None)
     po_number = values.pop("po_number", "").strip()
     for key, value in values.items():
         if key != "items":
@@ -493,11 +513,11 @@ def reconcile_invoice(invoice_id: int, db: Session = Depends(get_db), user: User
         {**line, "quantity": float(line["quantity"])} for line in aggregate_gr_lines.values()
     ]) if receipts else None
     started_at = datetime.now(timezone.utc)
-    row.warnings = reconcile(row, po, aggregated_receipt)
+    settings_snapshot = get_reconciliation_settings(db)
+    row.warnings = reconcile(row, po, aggregated_receipt, db=db)
     row.status = "matched" if not row.warnings else "mismatch"
     for old_run in db.query(ReconciliationRun).filter_by(invoice_id=row.id).all():
         old_run.status = "superseded"
-    settings_snapshot = get_reconciliation_settings()
     run = ReconciliationRun(
         invoice_id=row.id,
         review_id=review.review_id,
@@ -560,6 +580,37 @@ def approve_invoice(invoice_id: int, db: Session = Depends(get_db), user: User =
     audit(db, user, "invoice.approve", "invoice", row.id)
     db.commit(); db.refresh(row)
     return serialize(row)
+
+
+@router.post("/{invoice_id}/reject")
+def reject_invoice(invoice_id: int, body: RejectIn, db: Session = Depends(get_db),
+                   user: User = Depends(require_roles("chief_accountant", "admin"))):
+    row = db.get(Invoice, invoice_id)
+    if not row:
+        raise HTTPException(404, "Không tìm thấy hóa đơn")
+    if row.status == "approved":
+        raise HTTPException(409, "Hóa đơn đã phê duyệt; không thể từ chối")
+    reason = body.reason.strip()
+    if not reason:
+        raise HTTPException(422, "Vui lòng nhập lý do từ chối")
+
+    has_payment = db.query(InvoicePayment.payment_id).join(
+        InvoiceApproval, InvoicePayment.approval_id == InvoiceApproval.approval_id
+    ).filter(InvoiceApproval.invoice_id == row.id).first()
+    if has_payment:
+        raise HTTPException(409, "Hóa đơn đã có thanh toán; không thể thay đổi trạng thái")
+
+    row.status = "rejected"
+    row.review_note = reason
+    for review in db.query(InvoiceReview).filter_by(invoice_id=row.id, status="reviewed").all():
+        review.status = "invalidated"
+        review.invalidated_at = datetime.now(timezone.utc)
+    for run in db.query(ReconciliationRun).filter_by(invoice_id=row.id).all():
+        run.status = "superseded"
+    audit(db, user, "invoice.reject", "invoice", row.id, reason[:500])
+    db.commit()
+    db.refresh(row)
+    return {"message": "Đã từ chối hóa đơn", "invoice": serialize(row)}
 
 
 @router.get("/{invoice_id}/file")

@@ -4,7 +4,6 @@ import type {
   InvoiceRecord,
   ProcessingStatus,
   PurchaseOrder,
-  RpaScanLog,
   RuleSettings,
   SupplierMaster,
   UserProfile,
@@ -26,7 +25,6 @@ import {
   adaptBackendSuppliers,
   adaptBackendPurchaseOrders,
   adaptBackendGoodsReceipts,
-  adaptRpaLogs,
 } from './adapter.ts';
 import { evaluateLineItem, validateInvoiceMath, formatCurrencyVND } from '../utils/matchingEngine.ts';
 
@@ -55,11 +53,15 @@ export interface BackendInvoiceDTO {
   original_name: string;
   status: string;
   seller_tax_code: string;
+  seller_name: string;
   buyer_tax_code: string;
   invoice_number: string;
+  invoice_series: string;
   invoice_date: string | null;
+  subtotal_amount: number | null;
+  tax_amount: number | null;
   total_amount: number | null;
-  items: Array<{ name?: string; description?: string; quantity?: number | null; unit_price?: number | null; amount?: number | null; unit?: string | null }>;
+  items: Array<{ name?: string; description?: string; quantity?: number | null; unit_price?: number | null; tax_rate?: number | null; amount?: number | null; unit?: string | null }>;
   ocr_text: string | null;
   ocr_blocks: unknown[];
   ocr_confidence: number | null;
@@ -93,34 +95,50 @@ export interface ReconciliationSettingsDTO {
   currency_tolerance: number;
   item_similarity_threshold: number;
   ocr_confidence_min: number;
+  rpa_scan_interval_minutes: number;
+  auto_alert_email: boolean;
+  auto_alert_telegram: boolean;
 }
 export interface AuditEventDTO {
   id: number;
   actor: string;
+  actor_role: BackendRole | null;
   action: string;
   entity: string;
   detail: string;
   created_at: string;
 }
 
-export interface SupplierDTO { id: number; tax_code: string; name: string; email: string }
+export interface SupplierDTO { id: number; supplier_code: string | null; tax_code: string; name: string; address: string; phone: string; email: string }
+export interface ProductCategoryDTO { id: number; code: string; name: string; description: string }
+export interface ProductDTO { id: number; code: string; name: string; category_code: string; unit: string; cost_price: number; selling_price: number; stock_qty: number }
+export interface CustomerDTO { id: number; code: string; name: string; phone: string; address: string; email: string }
+export interface EmployeeDTO { id: number; code: string; full_name: string; role: string; phone: string; email: string }
+export interface VoucherDTO { id: number; voucher_number: string; voucher_type: 'THU' | 'CHI'; voucher_date: string; related_party_name: string; related_invoice_id: number | null; content: string; amount: number; is_auto_generated: boolean }
 export interface PurchaseOrderDTO {
-  id: number; po_number: string; supplier_tax_code: string; total_amount: number; status: string; lines: Array<Record<string, unknown>>;
+  id: number; po_number: string; supplier_tax_code: string; supplier_name: string; total_amount: number; status: string;
+  order_date: string; expected_delivery_date: string; created_by: string; employee_code: string; lines: Array<Record<string, unknown>>;
 }
 export interface GoodsReceiptDTO {
-  id: number; receipt_number: string; po_number: string; lines: Array<Record<string, unknown>>; received_at: string;
+  id: number; receipt_number: string; po_number: string; supplier_name: string; lines: Array<Record<string, unknown>>;
+  received_at: string; received_by: string; warehouse_location: string;
 }
 export interface InvoiceReviewInDTO {
   seller_tax_code: string;
+  seller_name: string;
+  invoice_series: string;
   buyer_tax_code: string;
   invoice_number: string;
   invoice_date: string;
+  subtotal_amount?: number | null;
+  tax_amount?: number | null;
   total_amount: number | null;
   items: Array<Record<string, unknown>>;
   po_number: string;
   review_note: string;
 }
 export interface LedgerImportDTO { created: number; skipped: number; total_rows: number }
+export interface MasterDataImportDTO { created: number; skipped: number; total_rows: number }
 
 const runtimeEnv = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
 export const BASE_URL = (runtimeEnv?.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
@@ -305,9 +323,43 @@ function isAuthenticatedUser(value: unknown): value is AuthenticatedUser {
 function isSupplier(value: unknown): value is SupplierDTO {
   return isObject(value)
     && typeof value.id === 'number'
+    && (value.supplier_code === null || typeof value.supplier_code === 'string')
     && typeof value.tax_code === 'string'
     && typeof value.name === 'string'
+    && typeof value.address === 'string'
+    && typeof value.phone === 'string'
     && typeof value.email === 'string';
+}
+
+function isProductCategory(value: unknown): value is ProductCategoryDTO {
+  return isObject(value) && typeof value.id === 'number' && typeof value.code === 'string'
+    && typeof value.name === 'string' && typeof value.description === 'string';
+}
+
+function isProduct(value: unknown): value is ProductDTO {
+  return isObject(value) && typeof value.id === 'number' && typeof value.code === 'string'
+    && typeof value.name === 'string' && typeof value.category_code === 'string'
+    && typeof value.unit === 'string' && typeof value.cost_price === 'number'
+    && typeof value.selling_price === 'number' && typeof value.stock_qty === 'number';
+}
+
+function isCustomer(value: unknown): value is CustomerDTO {
+  return isObject(value) && typeof value.id === 'number' && typeof value.code === 'string'
+    && typeof value.name === 'string' && typeof value.phone === 'string'
+    && typeof value.address === 'string' && typeof value.email === 'string';
+}
+
+function isEmployee(value: unknown): value is EmployeeDTO {
+  return isObject(value) && typeof value.id === 'number' && typeof value.code === 'string'
+    && typeof value.full_name === 'string' && typeof value.role === 'string'
+    && typeof value.phone === 'string' && typeof value.email === 'string';
+}
+
+function isVoucher(value: unknown): value is VoucherDTO {
+  return isObject(value) && typeof value.id === 'number' && typeof value.voucher_number === 'string'
+    && (value.voucher_type === 'THU' || value.voucher_type === 'CHI') && typeof value.voucher_date === 'string'
+    && typeof value.related_party_name === 'string' && (value.related_invoice_id === null || typeof value.related_invoice_id === 'number')
+    && typeof value.content === 'string' && typeof value.amount === 'number' && typeof value.is_auto_generated === 'boolean';
 }
 
 function isPurchaseOrder(value: unknown): value is PurchaseOrderDTO {
@@ -315,8 +367,13 @@ function isPurchaseOrder(value: unknown): value is PurchaseOrderDTO {
     && typeof value.id === 'number'
     && typeof value.po_number === 'string'
     && typeof value.supplier_tax_code === 'string'
+    && typeof value.supplier_name === 'string'
     && typeof value.total_amount === 'number'
     && typeof value.status === 'string'
+    && typeof value.order_date === 'string'
+    && typeof value.expected_delivery_date === 'string'
+    && typeof value.created_by === 'string'
+    && typeof value.employee_code === 'string'
     && Array.isArray(value.lines);
 }
 
@@ -325,7 +382,10 @@ function isGoodsReceipt(value: unknown): value is GoodsReceiptDTO {
     && typeof value.id === 'number'
     && typeof value.receipt_number === 'string'
     && typeof value.po_number === 'string'
+    && typeof value.supplier_name === 'string'
     && typeof value.received_at === 'string'
+    && typeof value.received_by === 'string'
+    && typeof value.warehouse_location === 'string'
     && Array.isArray(value.lines);
 }
 
@@ -365,32 +425,18 @@ export const api = {
   },
 
   async restoreSession(): Promise<AuthenticatedUser | null> {
-    if (!readStoredToken()) {
-      try {
-        return await this.login('admin@gmail.com', 'admin');
-      } catch {
-        return null;
-      }
-    }
+    if (!readStoredToken()) return null;
     try {
       const user = await request<AuthenticatedUser>('/auth/me');
       if (!isAuthenticatedUser(user)) {
         clearToken();
-        try {
-          return await this.login('admin@gmail.com', 'admin');
-        } catch {
-          return null;
-        }
+        return null;
       }
       return user;
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         clearToken();
-        try {
-          return await this.login('admin@gmail.com', 'admin');
-        } catch {
-          return null;
-        }
+        return null;
       }
       throw error;
     }
@@ -493,11 +539,16 @@ export const api = {
   },
 
   async rejectInvoice(id: number, reason: string): Promise<{ message: string; invoice: BackendInvoiceDTO }> {
-    return request<{ message: string; invoice: BackendInvoiceDTO }>(`/invoices/${id}/reject`, {
+    const value = await request<unknown>(`/invoices/${id}/reject`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reason }),
     });
+    if (!value || typeof value !== 'object' || !('message' in value) || !('invoice' in value)
+      || typeof value.message !== 'string' || !isBackendInvoice(value.invoice)) {
+      throw new ApiError('Kết quả từ chối hóa đơn không hợp lệ.');
+    }
+    return value as { message: string; invoice: BackendInvoiceDTO };
   },
 
   async saveInvoiceReview(id: number, payload: InvoiceReviewInDTO): Promise<BackendInvoiceDTO> {
@@ -514,15 +565,17 @@ export const api = {
     return this.saveInvoiceReview(id, payload);
   },
 
-  async reconcileInvoice(id: number): Promise<{ message: string; status: string }> {
-    return request<{ message: string; status: string }>(`/invoices/${id}/reconcile`, { method: 'POST' });
+  async reconcileInvoice(id: number): Promise<BackendInvoiceDTO> {
+    const value = await request<unknown>(`/invoices/${id}/reconcile`, { method: 'POST' });
+    if (!isBackendInvoice(value)) throw new ApiError('Kết quả đối soát hóa đơn không hợp lệ.');
+    return value;
   },
 
   async listSuppliers(): Promise<SupplierDTO[]> {
     return validateArray(await request<unknown>('/ledger/suppliers'), 'nhà cung cấp', isSupplier);
   },
 
-  async createSupplier(body: { tax_code: string; name: string; email: string }): Promise<SupplierDTO> {
+  async createSupplier(body: { supplier_code?: string; tax_code: string; name: string; address?: string; phone?: string; email: string }): Promise<SupplierDTO> {
     const value = await request<unknown>('/ledger/suppliers', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
@@ -534,15 +587,123 @@ export const api = {
     return this.createSupplier(body);
   },
 
+  async updateSupplier(id: number, body: Partial<{ supplier_code: string; tax_code: string; name: string; address: string; phone: string; email: string }>): Promise<SupplierDTO> {
+    const value = await request<unknown>(`/ledger/suppliers/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    if (!isSupplier(value)) throw new ApiError('Máy chủ trả về nhà cung cấp không hợp lệ.');
+    return value;
+  },
+
   async deleteSupplier(id: number): Promise<{ message: string }> {
     return request<{ message: string }>(`/ledger/suppliers/${id}`, { method: 'DELETE' });
+  },
+
+  async listProductCategories(): Promise<ProductCategoryDTO[]> {
+    return validateArray(await request<unknown>('/master-data/product-categories'), 'loại sản phẩm', isProductCategory);
+  },
+
+  async createProductCategory(body: Omit<ProductCategoryDTO, 'id'>): Promise<ProductCategoryDTO> {
+    const value = await request<unknown>('/master-data/product-categories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!isProductCategory(value)) throw new ApiError('Máy chủ trả về loại sản phẩm không hợp lệ.');
+    return value;
+  },
+
+  async updateProductCategory(code: string, body: Partial<Omit<ProductCategoryDTO, 'id' | 'code'>>): Promise<ProductCategoryDTO> {
+    const value = await request<unknown>(`/master-data/product-categories/${encodeURIComponent(code)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!isProductCategory(value)) throw new ApiError('Máy chủ trả về loại sản phẩm không hợp lệ.');
+    return value;
+  },
+
+  async deleteProductCategory(code: string): Promise<{ message: string }> {
+    return request<{ message: string }>(`/master-data/product-categories/${encodeURIComponent(code)}`, { method: 'DELETE' });
+  },
+
+  async listProducts(): Promise<ProductDTO[]> {
+    return validateArray(await request<unknown>('/master-data/products'), 'sản phẩm', isProduct);
+  },
+
+  async createProduct(body: Omit<ProductDTO, 'id'>): Promise<ProductDTO> {
+    const value = await request<unknown>('/master-data/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!isProduct(value)) throw new ApiError('Máy chủ trả về sản phẩm không hợp lệ.');
+    return value;
+  },
+
+  async updateProduct(code: string, body: Partial<Omit<ProductDTO, 'id' | 'code'>>): Promise<ProductDTO> {
+    const value = await request<unknown>(`/master-data/products/${encodeURIComponent(code)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!isProduct(value)) throw new ApiError('Máy chủ trả về sản phẩm không hợp lệ.');
+    return value;
+  },
+
+  async deleteProduct(code: string): Promise<{ message: string }> {
+    return request<{ message: string }>(`/master-data/products/${encodeURIComponent(code)}`, { method: 'DELETE' });
+  },
+
+  async listCustomers(): Promise<CustomerDTO[]> {
+    return validateArray(await request<unknown>('/master-data/customers'), 'khách hàng', isCustomer);
+  },
+
+  async createCustomer(body: Omit<CustomerDTO, 'id'>): Promise<CustomerDTO> {
+    const value = await request<unknown>('/master-data/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!isCustomer(value)) throw new ApiError('Máy chủ trả về khách hàng không hợp lệ.');
+    return value;
+  },
+
+  async updateCustomer(code: string, body: Partial<Omit<CustomerDTO, 'id' | 'code'>>): Promise<CustomerDTO> {
+    const value = await request<unknown>(`/master-data/customers/${encodeURIComponent(code)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!isCustomer(value)) throw new ApiError('Máy chủ trả về khách hàng không hợp lệ.');
+    return value;
+  },
+
+  async deleteCustomer(code: string): Promise<{ message: string }> {
+    return request<{ message: string }>(`/master-data/customers/${encodeURIComponent(code)}`, { method: 'DELETE' });
+  },
+
+  async listEmployees(): Promise<EmployeeDTO[]> {
+    return validateArray(await request<unknown>('/master-data/employees'), 'nhân viên', isEmployee);
+  },
+
+  async createEmployee(body: Omit<EmployeeDTO, 'id'>): Promise<EmployeeDTO> {
+    const value = await request<unknown>('/master-data/employees', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!isEmployee(value)) throw new ApiError('Máy chủ trả về nhân viên không hợp lệ.');
+    return value;
+  },
+
+  async updateEmployee(code: string, body: Partial<Omit<EmployeeDTO, 'id' | 'code'>>): Promise<EmployeeDTO> {
+    const value = await request<unknown>(`/master-data/employees/${encodeURIComponent(code)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!isEmployee(value)) throw new ApiError('Máy chủ trả về nhân viên không hợp lệ.');
+    return value;
+  },
+
+  async deleteEmployee(code: string): Promise<{ message: string }> {
+    return request<{ message: string }>(`/master-data/employees/${encodeURIComponent(code)}`, { method: 'DELETE' });
+  },
+
+  async listAccountingVouchers(): Promise<VoucherDTO[]> {
+    return validateArray(await request<unknown>('/accounting/vouchers'), 'phiếu thu chi', isVoucher);
+  },
+
+  async createAccountingVoucher(body: Omit<VoucherDTO, 'id' | 'voucher_number' | 'is_auto_generated'>): Promise<VoucherDTO> {
+    const value = await request<unknown>('/accounting/vouchers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!isVoucher(value)) throw new ApiError('Máy chủ trả về phiếu thu chi không hợp lệ.');
+    return value;
+  },
+
+  async updateAccountingVoucher(id: number, body: Partial<Omit<VoucherDTO, 'id' | 'voucher_number' | 'is_auto_generated'>>): Promise<VoucherDTO> {
+    const value = await request<unknown>(`/accounting/vouchers/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!isVoucher(value)) throw new ApiError('Máy chủ trả về phiếu thu chi không hợp lệ.');
+    return value;
+  },
+
+  async deleteAccountingVoucher(id: number): Promise<{ message: string }> {
+    return request<{ message: string }>(`/accounting/vouchers/${id}`, { method: 'DELETE' });
   },
 
   async listPurchaseOrders(): Promise<PurchaseOrderDTO[]> {
     return validateArray(await request<unknown>('/ledger/purchase-orders'), 'đơn đặt hàng', isPurchaseOrder);
   },
 
-  async createPurchaseOrder(body: { po_number: string; supplier_tax_code: string; total_amount: number; lines: Array<Record<string, unknown>> }): Promise<PurchaseOrderDTO> {
+  async createPurchaseOrder(body: { po_number: string; supplier_tax_code: string; total_amount: number; order_date: string; expected_delivery_date: string; employee_code: string; lines: Array<Record<string, unknown>> }): Promise<PurchaseOrderDTO> {
     const value = await request<unknown>('/ledger/purchase-orders', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
@@ -566,7 +727,7 @@ export const api = {
     return validateArray(await request<unknown>('/ledger/goods-receipts'), 'phiếu nhập', isGoodsReceipt);
   },
 
-  async createGoodsReceipt(body: { receipt_number: string; po_number: string; lines: Array<Record<string, unknown>> }): Promise<GoodsReceiptDTO> {
+  async createGoodsReceipt(body: { receipt_number: string; po_number: string; received_by: string; warehouse_location: string; lines: Array<Record<string, unknown>> }): Promise<GoodsReceiptDTO> {
     const value = await request<unknown>('/ledger/goods-receipts', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
@@ -594,6 +755,16 @@ export const api = {
       throw new ApiError('Máy chủ trả về kết quả import không hợp lệ.');
     }
     return value as unknown as LedgerImportDTO;
+  },
+
+  async importMasterData(kind: 'product-categories' | 'products' | 'customers' | 'employees', file: File): Promise<MasterDataImportDTO> {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    const value = await request<unknown>(`/master-data/import/${kind}`, { method: 'POST', body: form });
+    if (!isObject(value) || typeof value.created !== 'number' || typeof value.skipped !== 'number' || typeof value.total_rows !== 'number') {
+      throw new ApiError('Máy chủ trả về kết quả import danh mục không hợp lệ.');
+    }
+    return value as unknown as MasterDataImportDTO;
   },
 
   async getReconciliationSettings(): Promise<ReconciliationSettingsDTO> {
@@ -627,10 +798,6 @@ export const api = {
     return requestBlob(paths[kind]);
   },
 
-  async clearAllData(): Promise<{ message: string }> {
-    const value = await request<unknown>('/ledger/clear-all', { method: 'POST' });
-    return { message: String((value as any)?.message || 'Đã xóa dữ liệu.') };
-  },
 };
 
 // ==========================================
@@ -645,11 +812,13 @@ function mapBackendStatusToLegacy(status: string): ProcessingStatus {
     case 'mismatch':
       return 'MISMATCH';
     case 'needs_review':
-    case 'reviewed':
       return 'NEED_CONFIRM';
+    case 'reviewed':
+      return 'OCR_REVIEWED';
     case 'ocr_done':
+      return 'OCR_DONE';
     case 'waiting':
-      return 'PADDLE_OCR';
+      return 'WAITING';
     case 'rejected':
       return 'REJECTED';
     default:
@@ -661,13 +830,16 @@ function mapBackendStatusToLegacy(status: string): ProcessingStatus {
 class InvoiceStore {
   private invoices: InvoiceRecord[] = [];
   private purchaseOrders: PurchaseOrder[] = [];
+  private purchaseOrderIdByCode = new Map<string, number>();
   private goodsReceipts: GoodsReceipt[] = [];
+  private goodsReceiptIdByCode = new Map<string, number>();
   private suppliers: SupplierMaster[] = [];
+  private supplierIdByCode = new Map<string, number>();
   private productCategories: ProductCategory[] = [];
   private products: Product[] = [];
   private customers: Customer[] = [];
   private employees: Employee[] = [];
-  private rpaLogs: RpaScanLog[] = [];
+  private workerStatus: WorkerStatusDTO | null = null;
   private auditEvents: AuditEventDTO[] = [];
   private settings: RuleSettings = { ...INITIAL_SETTINGS };
   private currentUser: UserProfile = INITIAL_USER_PROFILES[0];
@@ -720,69 +892,19 @@ class InvoiceStore {
     field: 'itemNameInvoice' | 'quantityInvoice' | 'unitPriceInvoice',
     value: string | number,
     reason: string
-  ): InvoiceRecord {
+  ): Promise<InvoiceRecord> {
     const inv = this.invoices.find((i) => i.code === invoiceCode || i.id === invoiceCode);
     if (!inv) throw new Error(`Không tìm thấy hóa đơn ${invoiceCode}`);
-
-    const item = inv.lineItems.find((l) => l.lineNo === lineNo);
+    const item = inv.lineItems.find((line) => line.lineNo === lineNo);
     if (!item) throw new Error(`Không tìm thấy dòng hàng #${lineNo}`);
-
-    const oldValue = String(item[field]);
-    const newValue = String(value);
-
-    if (field === 'itemNameInvoice') {
-      item.itemNameInvoice = String(value);
-    } else if (field === 'quantityInvoice') {
-      item.quantityInvoice = Number(value);
-      item.amountInvoice = item.quantityInvoice * item.unitPriceInvoice;
-    } else if (field === 'unitPriceInvoice') {
-      item.unitPriceInvoice = Number(value);
-      item.amountInvoice = item.quantityInvoice * item.unitPriceInvoice;
-    }
-
-    const audit: AuditLog = {
-      id: `audit-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-      invoiceCode,
-      timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-      user: this.currentUser.name,
-      userRole: this.currentUser.role,
-      field: `Dòng #${lineNo} - ${field}`,
-      oldValue,
-      newValue,
-      reason: reason || 'Kế toán viên hiệu chỉnh dữ liệu OCR',
-    };
-    inv.auditLogs.unshift(audit);
-
-    inv.header.subTotal = inv.lineItems.reduce((sum, it) => sum + it.amountInvoice, 0);
-    const avgVatRate = item.vatRate || 10;
-    inv.header.vatAmount = Math.round((inv.header.subTotal * avgVatRate) / 100);
-    inv.header.grandTotal = inv.header.subTotal + inv.header.vatAmount;
-
-    this.recalculateInvoiceMatching(inv);
-    this.notify();
-
-    // Call real backend review asynchronously
-    const numericId = Number(inv.id);
-    if (!Number.isNaN(numericId) && numericId > 0) {
-      void api.reviewInvoice(numericId, {
-        seller_tax_code: inv.header.sellerTaxCode,
-        buyer_tax_code: inv.header.buyerTaxCode,
-        invoice_number: inv.header.invoiceNumber,
-        invoice_date: inv.header.issueDate,
-        total_amount: inv.header.grandTotal,
-        po_number: inv.header.poCode,
-        review_note: reason || 'Kế toán hiệu chỉnh',
-        items: inv.lineItems.map((l) => ({
-          name: l.itemNameInvoice,
-          quantity: l.quantityInvoice,
-          unit_price: l.unitPriceInvoice,
-          amount: l.amountInvoice,
-          unit: l.unit,
-        })),
-      }).catch((err) => console.error('Lỗi lưu review lên backend:', err));
-    }
-
-    return inv;
+    const nextValue = field === 'itemNameInvoice' ? String(value) : Number(value);
+    const lineNameUpdates = field === 'itemNameInvoice' ? { [lineNo]: String(value) } : {};
+    const itemOverrides = field === 'itemNameInvoice' ? {} : { [lineNo]: { [field]: nextValue } };
+    return this.saveInvoiceReviewAndReconcile(invoiceCode, {
+      lineNameUpdates,
+      itemOverrides,
+      note: reason,
+    });
   }
 
   public updateInvoiceHeaderField(
@@ -790,29 +912,63 @@ class InvoiceStore {
     field: keyof InvoiceRecord['header'],
     value: any,
     reason: string
-  ): InvoiceRecord {
-    const inv = this.invoices.find((i) => i.code === invoiceCode || i.id === invoiceCode);
+  ): Promise<InvoiceRecord> {
+    return this.saveInvoiceReviewAndReconcile(invoiceCode, {
+      header: { [field]: value },
+      note: reason,
+    });
+  }
+
+  public async saveInvoiceReviewAndReconcile(
+    invoiceCode: string,
+    options: {
+      header?: Partial<InvoiceRecord['header']>;
+      lineNameUpdates?: Record<number, string>;
+      itemOverrides?: Record<number, Partial<Pick<LineItem, 'quantityInvoice' | 'unitPriceInvoice'>>>;
+      note?: string;
+    } = {},
+  ): Promise<InvoiceRecord> {
+    const inv = this.invoices.find((invoice) => invoice.code === invoiceCode || invoice.id === invoiceCode);
     if (!inv) throw new Error(`Không tìm thấy hóa đơn ${invoiceCode}`);
-
-    const oldValue = String((inv.header as any)[field]);
-    (inv.header as any)[field] = value;
-
-    const audit: AuditLog = {
-      id: `audit-${Date.now()}`,
-      invoiceCode,
-      timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-      user: this.currentUser.name,
-      userRole: this.currentUser.role,
-      field: `Header - ${String(field)}`,
-      oldValue,
-      newValue: String(value),
-      reason: reason || 'Chỉnh sửa thông tin chung hóa đơn',
-    };
-    inv.auditLogs.unshift(audit);
-
-    this.recalculateInvoiceMatching(inv);
-    this.notify();
-    return inv;
+    const numericId = Number(inv.id);
+    if (!Number.isInteger(numericId) || numericId <= 0) throw new Error('Hóa đơn chưa có mã bản ghi từ máy chủ.');
+    const header = { ...inv.header, ...options.header };
+    const lines = inv.lineItems.map((line) => ({
+      ...line,
+      ...options.itemOverrides?.[line.lineNo],
+      itemNameInvoice: options.lineNameUpdates?.[line.lineNo] ?? line.itemNameInvoice,
+    }));
+    await api.saveInvoiceReview(numericId, {
+      seller_tax_code: header.sellerTaxCode,
+      seller_name: header.sellerName,
+      invoice_series: header.invoiceSeries,
+      buyer_tax_code: header.buyerTaxCode,
+      invoice_number: header.invoiceNumber,
+      invoice_date: header.issueDate,
+      subtotal_amount: header.subTotal,
+      tax_amount: header.vatAmount,
+      total_amount: header.grandTotal,
+      items: lines.map((line) => ({
+        name: line.itemNameInvoice,
+        quantity: line.quantityInvoice,
+        unit_price: line.unitPriceInvoice,
+        tax_rate: line.vatRate,
+        amount: line.amountInvoice,
+        unit: line.unit,
+      })),
+      po_number: header.poCode,
+      review_note: options.note || 'Đã kiểm tra và lưu dữ liệu hóa đơn',
+    });
+    try {
+      await api.reconcileInvoice(numericId);
+    } catch (error) {
+      await this.syncWithBackend().catch(() => undefined);
+      throw error;
+    }
+    await this.syncWithBackend();
+    const saved = this.invoices.find((invoice) => invoice.code === inv.code);
+    if (!saved) throw new Error('Đã lưu trên máy chủ nhưng không đọc lại được hóa đơn sau đối soát.');
+    return saved;
   }
 
   public recalculateInvoiceMatching(inv: InvoiceRecord): void {
@@ -830,28 +986,31 @@ class InvoiceStore {
       return evalResult.evaluatedItem;
     });
 
-    const mathCheck = validateInvoiceMath(
-      inv.header.subTotal,
-      inv.header.vatAmount,
-      inv.header.grandTotal,
-      this.settings.toleranceThresholdVnd
-    );
+    const { subTotal, vatAmount, grandTotal } = inv.header;
+    if (subTotal != null && vatAmount != null && grandTotal != null) {
+      const mathCheck = validateInvoiceMath(
+        subTotal,
+        vatAmount,
+        grandTotal,
+        this.settings.toleranceThresholdVnd
+      );
 
-    if (!mathCheck.isValid) {
-      hasCritical = true;
-      allAnomalies.push({
-        id: `ANOM-MATH-FOOTER-${inv.code}`,
-        type: 'MATH_ERROR',
-        severity: 'CRITICAL',
-        title: 'Sai lệch công thức tiền thanh toán chân trang',
-        description: `Tổng cộng HĐ (${inv.header.grandTotal}) lệch ${mathCheck.variance} đ so với công thức.`,
-        fieldKey: 'grandTotal',
-      });
+      if (!mathCheck.isValid) {
+        hasCritical = true;
+        allAnomalies.push({
+          id: `ANOM-MATH-FOOTER-${inv.code}`,
+          type: 'MATH_ERROR',
+          severity: 'CRITICAL',
+          title: 'Sai lệch công thức tiền thanh toán chân trang',
+          description: `Tổng cộng HĐ (${grandTotal}) lệch ${mathCheck.variance} đ so với công thức.`,
+          fieldKey: 'grandTotal',
+        });
+      }
     }
 
     if (hasCritical) {
       inv.status = 'MISMATCH';
-    } else if (hasWarning || inv.header.ocrAverageConfidence < this.settings.ocrConfidenceThresholdPct) {
+    } else if (hasWarning || (inv.header.ocrAverageConfidence != null && inv.header.ocrAverageConfidence < this.settings.ocrConfidenceThresholdPct)) {
       inv.status = 'NEED_CONFIRM';
     } else {
       inv.status = 'MATCHED';
@@ -860,111 +1019,28 @@ class InvoiceStore {
     inv.anomalies = allAnomalies;
   }
 
-  public verifyAndApproveInvoice(invoiceCode: string, note: string): InvoiceRecord {
+  public async verifyAndApproveInvoice(invoiceCode: string, _note: string): Promise<InvoiceRecord> {
     const inv = this.invoices.find((i) => i.code === invoiceCode || i.id === invoiceCode);
     if (!inv) throw new Error(`Không tìm thấy hóa đơn ${invoiceCode}`);
-
-    inv.status = 'MATCHED';
-    inv.approvedBy = this.currentUser.name;
-    inv.approvedAt = new Date().toISOString().replace('T', ' ').substring(0, 19);
-    inv.approvalNote = note;
-
-    inv.auditLogs.unshift({
-      id: `audit-${Date.now()}`,
-      invoiceCode,
-      timestamp: inv.approvedAt,
-      user: this.currentUser.name,
-      userRole: this.currentUser.role,
-      field: 'Trạng thái phê duyệt',
-      oldValue: 'NEED_CONFIRM',
-      newValue: 'MATCHED (ĐÃ PHÊ DUYỆT)',
-      reason: note || 'Kế toán trưởng phê duyệt hạch toán sau khi kiểm tra',
-    });
-
-    this.notify();
-
-    // Call real backend approve
     const numericId = Number(inv.id);
-    if (!Number.isNaN(numericId) && numericId > 0) {
-      void api.approveInvoice(numericId).catch((err) => console.error('Lỗi duyệt trên backend:', err));
-    }
-
-    return inv;
+    if (!Number.isInteger(numericId) || numericId <= 0) throw new Error('Hóa đơn chưa có mã bản ghi từ máy chủ.');
+    await api.approveInvoice(numericId);
+    await this.syncWithBackend();
+    const saved = this.invoices.find((invoice) => invoice.code === inv.code);
+    if (!saved) throw new Error('Đã duyệt trên máy chủ nhưng không tải lại được hóa đơn.');
+    return saved;
   }
 
-  public rejectInvoice(invoiceCode: string, reason: string): InvoiceRecord {
+  public async rejectInvoice(invoiceCode: string, reason: string): Promise<InvoiceRecord> {
     const inv = this.invoices.find((i) => i.code === invoiceCode || i.id === invoiceCode);
     if (!inv) throw new Error(`Không tìm thấy hóa đơn ${invoiceCode}`);
-
-    inv.status = 'REJECTED';
-    inv.approvalNote = `Từ chối: ${reason}`;
-    inv.auditLogs.unshift({
-      id: `audit-${Date.now()}`,
-      invoiceCode,
-      timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-      user: this.currentUser.name,
-      userRole: this.currentUser.role,
-      field: 'Trạng thái',
-      oldValue: 'MISMATCH',
-      newValue: 'REJECTED (TỪ CHỐI)',
-      reason: reason || 'Yêu cầu nhà cung cấp xuất lại hóa đơn',
-    });
-
-    this.notify();
-
-    // Call real backend reject
     const numericId = Number(inv.id);
-    if (!Number.isNaN(numericId) && numericId > 0) {
-      void api.rejectInvoice(numericId, reason).catch((err) => console.error('Lỗi từ chối trên backend:', err));
-    }
-
-    return inv;
-  }
-
-  public addUploadedInvoice(fileName: string, fileSizeKb: number): InvoiceRecord {
-    const nextNum = this.invoices.length + 1;
-    const invCode = `INV-2026-${String(nextNum).padStart(4, '0')}`;
-    const hash = Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
-
-    const newInv: InvoiceRecord = {
-      id: `inv-${Date.now()}`,
-      code: invCode,
-      fileName,
-      fileSizeKb,
-      fileSha256: hash,
-      receivedAt: new Date().toISOString().replace('T', ' ').substring(0, 19),
-      status: 'PADDLE_OCR',
-      header: {
-        invoiceCode: invCode,
-        invoiceNumber: String(1000 + nextNum),
-        invoiceSeries: '1C26TDD',
-        issueDate: new Date().toISOString().slice(0, 10),
-        sellerName: 'Nhà cung cấp mới tiếp nhận',
-        sellerTaxCode: '0108992341',
-        sellerAddress: 'Hà Nội, Việt Nam',
-        buyerName: 'CÔNG TY TNHH CÔNG NGHỆ & TỰ ĐỘNG HÓA THÔNG MINH VIỆT NAM',
-        buyerTaxCode: '0109876543',
-        buyerAddress: 'Tầng 8, Tòa nhà Landmark 72, Hà Nội',
-        poCode: 'PO-2026-0001',
-        grCode: 'PNK-2026-0001',
-        paymentMethod: 'Chuyển khoản (TM/CK)',
-        subTotal: 10000000,
-        vatAmount: 1000000,
-        grandTotal: 11000000,
-        qrCodeData: `0108992341;1C26TDD;${1000 + nextNum};11000000;2026-03-28`,
-        taxStatus: 'ACTIVE',
-        ocrAverageConfidence: 94.5,
-      },
-      lineItems: [],
-      anomalies: [],
-      auditLogs: [],
-      boundingBoxes: [],
-      ocrConfidenceMap: {},
-    };
-
-    this.invoices.unshift(newInv);
-    this.notify();
-    return newInv;
+    if (!Number.isInteger(numericId) || numericId <= 0) throw new Error('Hóa đơn chưa có mã bản ghi từ máy chủ.');
+    await api.rejectInvoice(numericId, reason);
+    await this.syncWithBackend();
+    const saved = this.invoices.find((invoice) => invoice.code === inv.code);
+    if (!saved) throw new Error('Đã từ chối trên máy chủ nhưng không tải lại được hóa đơn.');
+    return saved;
   }
 
   // Master Data
@@ -972,23 +1048,48 @@ class InvoiceStore {
     return [...this.purchaseOrders];
   }
 
-  public addPurchaseOrder(po: PurchaseOrder) {
-    this.purchaseOrders.unshift(po);
-    this.notify();
-    void api.createPurchaseOrder({
+  public async addPurchaseOrder(po: PurchaseOrder): Promise<void> {
+    const saved = await api.createPurchaseOrder({
       po_number: po.code,
       supplier_tax_code: po.supplierTaxCode,
       total_amount: po.totalEstimatedAmount,
-      lines: po.items,
-    }).catch((err) => console.error('Lỗi lưu PO lên backend:', err));
-  }
-
-  public updatePurchaseOrder(code: string, updated: Partial<PurchaseOrder>) {
-    this.purchaseOrders = this.purchaseOrders.map((p) => (p.code === code ? { ...p, ...updated } : p));
+      order_date: po.orderDate,
+      expected_delivery_date: po.expectedDeliveryDate,
+      employee_code: po.employeeCode || '',
+      lines: po.items.map((item) => ({ name: item.itemName, unit: item.unit, quantity: item.quantity, unit_price: item.unitPrice, amount: item.amount })),
+    });
+    this.purchaseOrderIdByCode.set(po.code, saved.id);
+    this.purchaseOrders.unshift(adaptBackendPurchaseOrders([saved])[0]);
     this.notify();
   }
 
-  public deletePurchaseOrder(code: string) {
+  public async updatePurchaseOrder(code: string, updated: Partial<PurchaseOrder>): Promise<void> {
+    const id = this.purchaseOrderIdByCode.get(code);
+    const current = this.purchaseOrders.find((po) => po.code === code);
+    if (!id || !current) throw new Error(`Không tìm thấy PO ${code} từ dữ liệu máy chủ.`);
+    const saved = await api.updatePurchaseOrder(id, {
+      po_number: updated.code || code,
+      supplier_tax_code: updated.supplierTaxCode || current.supplierTaxCode,
+      total_amount: updated.totalEstimatedAmount ?? current.totalEstimatedAmount,
+      status: updated.status?.toLowerCase(),
+      order_date: updated.orderDate ?? current.orderDate,
+      expected_delivery_date: updated.expectedDeliveryDate ?? current.expectedDeliveryDate,
+      employee_code: updated.employeeCode ?? current.employeeCode ?? '',
+      lines: updated.items?.map((item) => ({ name: item.itemName, unit: item.unit, quantity: item.quantity, unit_price: item.unitPrice, amount: item.amount })),
+    });
+    const nextCode = updated.code || code;
+    this.purchaseOrderIdByCode.delete(code);
+    this.purchaseOrderIdByCode.set(nextCode, saved.id);
+    const savedPo = adaptBackendPurchaseOrders([saved])[0];
+    this.purchaseOrders = this.purchaseOrders.map((po) => (po.code === code ? savedPo : po));
+    this.notify();
+  }
+
+  public async deletePurchaseOrder(code: string): Promise<void> {
+    const id = this.purchaseOrderIdByCode.get(code);
+    if (!id) throw new Error(`Không tìm thấy PO ${code} từ dữ liệu máy chủ.`);
+    await api.deletePurchaseOrder(id);
+    this.purchaseOrderIdByCode.delete(code);
     this.purchaseOrders = this.purchaseOrders.filter((p) => p.code !== code);
     this.notify();
   }
@@ -997,51 +1098,68 @@ class InvoiceStore {
     return [...this.goodsReceipts];
   }
 
-  public addGoodsReceipt(gr: GoodsReceipt) {
-    this.goodsReceipts.unshift(gr);
-    this.notify();
-    void api.createGoodsReceipt({
+  public async addGoodsReceipt(gr: GoodsReceipt): Promise<void> {
+    const saved = await api.createGoodsReceipt({
       receipt_number: gr.code,
       po_number: gr.poCode,
-      lines: gr.items,
-    }).catch((err) => console.error('Lỗi lưu GR lên backend:', err));
+      received_by: gr.receivedBy,
+      warehouse_location: gr.warehouseLocation,
+      lines: gr.items.map((item) => ({ name: item.itemName, unit: item.unit, quantity: item.quantityReceived, notes: item.notes || '' })),
+    });
+    this.goodsReceiptIdByCode.set(gr.code, saved.id);
+    this.goodsReceipts.unshift(adaptBackendGoodsReceipts([saved])[0]);
+    this.notify();
+  }
+
+  public async deleteGoodsReceipt(code: string): Promise<void> {
+    const id = this.goodsReceiptIdByCode.get(code);
+    if (!id) throw new Error(`Không tìm thấy phiếu nhập ${code} từ dữ liệu máy chủ.`);
+    await api.deleteGoodsReceipt(id);
+    this.goodsReceiptIdByCode.delete(code);
+    this.goodsReceipts = this.goodsReceipts.filter((receipt) => receipt.code !== code);
+    this.notify();
   }
 
   public getSuppliers(): SupplierMaster[] {
     return [...this.suppliers];
   }
 
-  public addSupplier(sup: SupplierMaster) {
-    this.suppliers.unshift(sup);
-    this.notify();
-    void api.createSupplier({
-      tax_code: sup.taxCode,
-      name: sup.name,
-      email: `${sup.code.toLowerCase()}@supplier.vn`,
-    }).catch((err) => console.error('Lỗi lưu NCC lên backend:', err));
-  }
-
-  public updateSupplier(code: string, updated: Partial<SupplierMaster>) {
-    this.suppliers = this.suppliers.map((s) => (s.code === code ? { ...s, ...updated } : s));
+  public async addSupplier(sup: SupplierMaster): Promise<void> {
+    const saved = await api.createSupplier({
+      supplier_code: sup.code, tax_code: sup.taxCode, name: sup.name,
+      address: sup.address, phone: sup.phone || '', email: sup.email || '',
+    });
+    const adapted = adaptBackendSuppliers([saved])[0];
+    this.supplierIdByCode.set(adapted.code, saved.id);
+    this.suppliers.unshift(adapted);
     this.notify();
   }
 
-  public deleteSupplier(code: string) {
+  public async updateSupplier(code: string, updated: Partial<SupplierMaster>): Promise<void> {
+    const id = this.supplierIdByCode.get(code);
+    if (!id) throw new Error(`Không tìm thấy mã nhà cung cấp ${code} từ dữ liệu máy chủ.`);
+    const saved = await api.updateSupplier(id, {
+      supplier_code: updated.code, tax_code: updated.taxCode, name: updated.name,
+      address: updated.address, phone: updated.phone, email: updated.email,
+    });
+    const adapted = adaptBackendSuppliers([saved])[0];
+    this.supplierIdByCode.delete(code);
+    this.supplierIdByCode.set(adapted.code, saved.id);
+    this.suppliers = this.suppliers.map((s) => (s.code === code ? adapted : s));
+    this.notify();
+  }
+
+  public async deleteSupplier(code: string): Promise<void> {
+    const id = this.supplierIdByCode.get(code);
+    if (!id) throw new Error(`Không tìm thấy mã nhà cung cấp ${code} từ dữ liệu máy chủ.`);
+    await api.deleteSupplier(id);
+    this.supplierIdByCode.delete(code);
     this.suppliers = this.suppliers.filter((s) => s.code !== code);
     this.notify();
   }
 
-  public getRpaLogs(): RpaScanLog[] {
-    return [...this.rpaLogs];
-  }
-
-  public addRpaScanLog(log: Omit<RpaScanLog, 'id' | 'timestamp'>) {
-    this.rpaLogs.unshift({
-      ...log,
-      id: `log-${Date.now()}`,
-      timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-    });
-    this.notify();
+  public getWorkerStatus(): WorkerStatusDTO | null {
+    return this.workerStatus ? { ...this.workerStatus } : null;
   }
 
   // Settings
@@ -1049,30 +1167,45 @@ class InvoiceStore {
     return { ...this.settings };
   }
 
-  public updateSettings(newSettings: Partial<RuleSettings>) {
-    this.settings = { ...this.settings, ...newSettings };
-    this.invoices.forEach((inv) => this.recalculateInvoiceMatching(inv));
+  public async updateSettings(newSettings: Partial<RuleSettings>): Promise<RuleSettings> {
+    const candidate = { ...this.settings, ...newSettings };
+    const saved = await api.updateReconciliationSettings({
+      currency_tolerance: candidate.toleranceThresholdVnd,
+      item_similarity_threshold: candidate.fuzzyMatchingThresholdPct,
+      ocr_confidence_min: candidate.ocrConfidenceThresholdPct / 100,
+      rpa_scan_interval_minutes: candidate.rpaScanIntervalMinutes,
+      auto_alert_email: candidate.autoAlertEmail,
+      auto_alert_telegram: candidate.autoAlertTelegram,
+    });
+    this.settings = {
+      ...candidate,
+      toleranceThresholdVnd: saved.currency_tolerance,
+      fuzzyMatchingThresholdPct: saved.item_similarity_threshold,
+      ocrConfidenceThresholdPct: Math.round(saved.ocr_confidence_min * 100),
+      rpaScanIntervalMinutes: saved.rpa_scan_interval_minutes,
+      autoAlertEmail: saved.auto_alert_email,
+      autoAlertTelegram: saved.auto_alert_telegram,
+    };
     this.notify();
-    void api.updateReconciliationSettings({
-      currency_tolerance: this.settings.toleranceThresholdVnd,
-      item_similarity_threshold: this.settings.fuzzyMatchingThresholdPct,
-      ocr_confidence_min: this.settings.ocrConfidenceThresholdPct / 100,
-    }).catch((err) => console.error('Lỗi lưu cấu hình lên backend:', err));
+    return this.getSettings();
   }
 
   // Master Data: Categories
   public getProductCategories(): ProductCategory[] {
     return [...this.productCategories];
   }
-  public addProductCategory(cat: ProductCategory) {
-    this.productCategories.unshift(cat);
+  public async addProductCategory(cat: ProductCategory): Promise<void> {
+    const saved = await api.createProductCategory({ code: cat.code, name: cat.name, description: cat.description });
+    this.productCategories.unshift({ code: saved.code, name: saved.name, description: saved.description });
     this.notify();
   }
-  public updateProductCategory(code: string, updated: Partial<ProductCategory>) {
-    this.productCategories = this.productCategories.map((c) => (c.code === code ? { ...c, ...updated } : c));
+  public async updateProductCategory(code: string, updated: Partial<ProductCategory>): Promise<void> {
+    const saved = await api.updateProductCategory(code, { name: updated.name, description: updated.description });
+    this.productCategories = this.productCategories.map((c) => (c.code === code ? { code: saved.code, name: saved.name, description: saved.description } : c));
     this.notify();
   }
-  public deleteProductCategory(code: string) {
+  public async deleteProductCategory(code: string): Promise<void> {
+    await api.deleteProductCategory(code);
     this.productCategories = this.productCategories.filter((c) => c.code !== code);
     this.notify();
   }
@@ -1081,15 +1214,21 @@ class InvoiceStore {
   public getProducts(): Product[] {
     return [...this.products];
   }
-  public addProduct(prod: Product) {
-    this.products.unshift(prod);
+  public async addProduct(prod: Product): Promise<void> {
+    const saved = await api.createProduct({ code: prod.code, name: prod.name, category_code: prod.categoryCode, unit: prod.unit, cost_price: prod.costPrice, selling_price: prod.sellingPrice, stock_qty: prod.stockQty });
+    this.products.unshift({ code: saved.code, name: saved.name, categoryCode: saved.category_code, unit: saved.unit, costPrice: saved.cost_price, sellingPrice: saved.selling_price, stockQty: saved.stock_qty });
     this.notify();
   }
-  public updateProduct(code: string, updated: Partial<Product>) {
-    this.products = this.products.map((p) => (p.code === code ? { ...p, ...updated } : p));
+  public async updateProduct(code: string, updated: Partial<Product>): Promise<void> {
+    const saved = await api.updateProduct(code, {
+      name: updated.name, category_code: updated.categoryCode, unit: updated.unit,
+      cost_price: updated.costPrice, selling_price: updated.sellingPrice, stock_qty: updated.stockQty,
+    });
+    this.products = this.products.map((p) => (p.code === code ? { code: saved.code, name: saved.name, categoryCode: saved.category_code, unit: saved.unit, costPrice: saved.cost_price, sellingPrice: saved.selling_price, stockQty: saved.stock_qty } : p));
     this.notify();
   }
-  public deleteProduct(code: string) {
+  public async deleteProduct(code: string): Promise<void> {
+    await api.deleteProduct(code);
     this.products = this.products.filter((p) => p.code !== code);
     this.notify();
   }
@@ -1098,15 +1237,18 @@ class InvoiceStore {
   public getCustomers(): Customer[] {
     return [...this.customers];
   }
-  public addCustomer(cust: Customer) {
-    this.customers.unshift(cust);
+  public async addCustomer(cust: Customer): Promise<void> {
+    const saved = await api.createCustomer({ code: cust.code, name: cust.name, phone: cust.phone, address: cust.address, email: cust.email });
+    this.customers.unshift({ code: saved.code, name: saved.name, phone: saved.phone, address: saved.address, email: saved.email });
     this.notify();
   }
-  public updateCustomer(code: string, updated: Partial<Customer>) {
-    this.customers = this.customers.map((c) => (c.code === code ? { ...c, ...updated } : c));
+  public async updateCustomer(code: string, updated: Partial<Customer>): Promise<void> {
+    const saved = await api.updateCustomer(code, { name: updated.name, phone: updated.phone, address: updated.address, email: updated.email });
+    this.customers = this.customers.map((c) => (c.code === code ? { code: saved.code, name: saved.name, phone: saved.phone, address: saved.address, email: saved.email } : c));
     this.notify();
   }
-  public deleteCustomer(code: string) {
+  public async deleteCustomer(code: string): Promise<void> {
+    await api.deleteCustomer(code);
     this.customers = this.customers.filter((c) => c.code !== code);
     this.notify();
   }
@@ -1115,29 +1257,19 @@ class InvoiceStore {
   public getEmployees(): Employee[] {
     return [...this.employees];
   }
-  public addEmployee(emp: Employee) {
-    this.employees.unshift(emp);
+  public async addEmployee(emp: Employee): Promise<void> {
+    const saved = await api.createEmployee({ code: emp.code, full_name: emp.fullName, role: emp.role, phone: emp.phone, email: emp.email });
+    this.employees.unshift({ code: saved.code, fullName: saved.full_name, role: saved.role, phone: saved.phone, email: saved.email });
     this.notify();
   }
-  public updateEmployee(code: string, updated: Partial<Employee>) {
-    this.employees = this.employees.map((e) => (e.code === code ? { ...e, ...updated } : e));
+  public async updateEmployee(code: string, updated: Partial<Employee>): Promise<void> {
+    const saved = await api.updateEmployee(code, { full_name: updated.fullName, role: updated.role, phone: updated.phone, email: updated.email });
+    this.employees = this.employees.map((e) => (e.code === code ? { code: saved.code, fullName: saved.full_name, role: saved.role, phone: saved.phone, email: saved.email } : e));
     this.notify();
   }
-  public deleteEmployee(code: string) {
+  public async deleteEmployee(code: string): Promise<void> {
+    await api.deleteEmployee(code);
     this.employees = this.employees.filter((e) => e.code !== code);
-    this.notify();
-  }
-
-  public loadSampleData() {
-    // Không nạp dữ liệu giả. Để danh mục theo dữ liệu thực từ backend hoặc người dùng tự thêm.
-    this.notify();
-  }
-
-  public clearAllMasterData() {
-    this.productCategories = [];
-    this.products = [];
-    this.customers = [];
-    this.employees = [];
     this.notify();
   }
 
@@ -1148,32 +1280,69 @@ class InvoiceStore {
   // SYNC WITH BACKEND
   public async syncWithBackend(): Promise<void> {
     try {
-      const [backendInvoices, backendSuppliers, pos, grs, worker, settingsData, auditEvents] = await Promise.all([
-        api.listInvoices().catch(() => []),
-        api.listSuppliers().catch(() => []),
-        api.listPurchaseOrders().catch(() => []),
-        api.listGoodsReceipts().catch(() => []),
-        api.getWorkerStatus().catch(() => null),
-        api.getReconciliationSettings().catch(() => null),
-        api.getAuditLog(100).catch(() => []),
+      const [backendInvoices, backendSuppliers, pos, grs, categories, products, customers, employees, worker, settingsData, auditEvents] = await Promise.all([
+        api.listInvoices(),
+        api.listSuppliers(),
+        api.listPurchaseOrders(),
+        api.listGoodsReceipts(),
+        api.listProductCategories(),
+        api.listProducts(),
+        api.listCustomers(),
+        api.listEmployees(),
+        api.getWorkerStatus(),
+        api.getReconciliationSettings(),
+        api.getAuditLog(100),
       ]);
 
       if (settingsData) {
         this.settings.toleranceThresholdVnd = settingsData.currency_tolerance;
         this.settings.fuzzyMatchingThresholdPct = settingsData.item_similarity_threshold;
         this.settings.ocrConfidenceThresholdPct = Math.round(settingsData.ocr_confidence_min * 100);
+        this.settings.rpaScanIntervalMinutes = settingsData.rpa_scan_interval_minutes;
+        this.settings.autoAlertEmail = settingsData.auto_alert_email;
+        this.settings.autoAlertTelegram = settingsData.auto_alert_telegram;
       }
 
       this.suppliers = adaptBackendSuppliers(backendSuppliers);
-      this.purchaseOrders = adaptBackendPurchaseOrders(pos);
+      this.supplierIdByCode = new Map(backendSuppliers.map((supplier, index) => [
+        supplier.supplier_code || `NCC-${String(index + 1).padStart(2, '0')}`,
+        supplier.id,
+      ]));
+      this.purchaseOrders = adaptBackendPurchaseOrders(pos, backendSuppliers);
       this.goodsReceipts = adaptBackendGoodsReceipts(grs);
-      this.invoices = adaptBackendInvoices(backendInvoices, backendSuppliers);
-      this.rpaLogs = adaptRpaLogs(worker);
+      this.purchaseOrderIdByCode = new Map(pos.map((po) => [po.po_number, po.id]));
+      this.goodsReceiptIdByCode = new Map(grs.map((receipt) => [receipt.receipt_number, receipt.id]));
+      this.invoices = adaptBackendInvoices(backendInvoices, backendSuppliers, pos, grs);
+      this.invoices.forEach((invoice) => {
+        invoice.auditLogs = auditEvents
+          .filter((event) => event.entity === `invoice:${invoice.id}`)
+          .map((event) => ({
+            id: String(event.id),
+            invoiceCode: invoice.code,
+            timestamp: event.created_at.slice(0, 19).replace('T', ' '),
+            user: event.actor,
+            userRole: event.actor_role === 'admin'
+              ? 'ADMIN'
+              : event.actor_role === 'chief_accountant'
+                ? 'CHIEF_ACCOUNTANT'
+                : event.actor_role === 'accountant' ? 'ACCOUNTANT' : 'UNKNOWN',
+            field: event.action,
+            oldValue: '',
+            newValue: event.detail,
+            reason: event.detail,
+          }));
+      });
+      this.productCategories = categories.map((row) => ({ code: row.code, name: row.name, description: row.description }));
+      this.products = products.map((row) => ({ code: row.code, name: row.name, categoryCode: row.category_code, unit: row.unit, costPrice: row.cost_price, sellingPrice: row.selling_price, stockQty: row.stock_qty }));
+      this.customers = customers.map((row) => ({ code: row.code, name: row.name, phone: row.phone, address: row.address, email: row.email }));
+      this.employees = employees.map((row) => ({ code: row.code, fullName: row.full_name, role: row.role, phone: row.phone, email: row.email }));
+      this.workerStatus = worker;
       this.auditEvents = auditEvents;
 
       this.notify();
     } catch (err) {
       console.error('Lỗi đồng bộ dữ liệu từ backend:', err);
+      throw err;
     }
   }
 }
@@ -1191,34 +1360,49 @@ export const mockActions = {
     return inv;
   },
 
-  async uploadInvoices(files: { name: string; size: number; file?: File }[]): Promise<{ uploadedCount: number; errors: string[] }> {
+  async uploadInvoices(files: { name: string; size: number; file?: File }[]): Promise<{
+    uploadedCount: number;
+    ocrNeedsReviewCount: number;
+    errors: string[];
+  }> {
     let uploadedCount = 0;
+    let ocrNeedsReviewCount = 0;
     const errors: string[] = [];
     for (const f of files) {
       if (f.file) {
         try {
-          await api.uploadInvoice(f.file);
+          const uploaded = await api.uploadInvoice(f.file);
           uploadedCount++;
+          if (uploaded.status !== 'ocr_done') ocrNeedsReviewCount++;
         } catch (e: any) {
           errors.push(`${f.name}: ${e?.message || 'Lỗi tải lên'}`);
         }
       }
     }
     await store.syncWithBackend();
-    return { uploadedCount, errors };
+    return { uploadedCount, ocrNeedsReviewCount, errors };
   },
 
-  async triggerRpaScan(): Promise<{ message: string; scannedCount: number; acceptedCount: number }> {
+  async triggerRpaScan(): Promise<{
+    status: 'success' | 'warning' | 'error';
+    message: string;
+    scannedCount: number;
+    acceptedCount: number;
+  }> {
     try {
       const res = await api.scanNow();
       await store.syncWithBackend();
       return {
-        message: res.message || 'Quét thư mục hoàn tất.',
+        status: res.active ? 'success' : 'warning',
+        message: res.active && res.added > 0
+          ? `${res.message} Hóa đơn mới đang chờ chạy OCR trong hàng đợi.`
+          : res.message || 'Quét thư mục hoàn tất.',
         scannedCount: res.added,
         acceptedCount: res.added,
       };
     } catch (e) {
       return {
+        status: 'error',
         message: e instanceof Error ? e.message : 'Lỗi quét thư mục',
         scannedCount: 0,
         acceptedCount: 0,
@@ -1236,28 +1420,12 @@ export const mockActions = {
     } else if (action === 'REJECT') {
       return store.rejectInvoice(invoiceCode, payload?.note || '');
     } else {
-      const inv = store.getInvoiceByCode(invoiceCode);
-      if (!inv) throw new Error(`Không tìm thấy hóa đơn ${invoiceCode}`);
-      store.recalculateInvoiceMatching(inv);
-      store.notify();
-      return inv;
+      return store.saveInvoiceReviewAndReconcile(invoiceCode, { note: payload?.note });
     }
   },
 
   async updateRuleSettings(newSettings: RuleSettings): Promise<RuleSettings> {
-    store.updateSettings(newSettings);
-    return store.getSettings();
+    return store.updateSettings(newSettings);
   },
 
-  async syncMisaErp(_invoices: InvoiceRecord[]): Promise<{ success: boolean; syncedCount: number; message: string }> {
-    return {
-      success: false,
-      syncedCount: 0,
-      message: 'Backend chưa hỗ trợ API đồng bộ trực tiếp MISA SME Cloud. Vui lòng sử dụng tính năng Xuất file Excel / XML để nạp vào MISA.',
-    };
-  },
-
-  async clearAuditLogs(_invoiceCode: string): Promise<void> {
-    // Clear logs
-  },
 };

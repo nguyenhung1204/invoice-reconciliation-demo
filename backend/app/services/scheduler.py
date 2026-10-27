@@ -3,11 +3,44 @@ import csv
 from datetime import date
 from pathlib import Path
 
+from apscheduler.schedulers.background import BackgroundScheduler
+
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models import AuditEvent, Invoice
 
 REPORT_DIR = Path(__file__).resolve().parents[2] / "data" / "reports"
+scheduler = BackgroundScheduler(daemon=True)
+
+
+def start_background_scheduler(inbox_interval_minutes: int = 5) -> None:
+    scheduler.add_job(generate_daily_reconciliation_report, "cron", hour=1, minute=0,
+                      id="daily-reconciliation-report", replace_existing=True)
+    inbox = Path(settings.inbox_scan_dir) if settings.inbox_scan_dir else None
+    if inbox and inbox.is_dir():
+        scheduler.add_job(scan_inbox_folder, "interval", minutes=inbox_interval_minutes,
+                          id="inbox-folder-scan", replace_existing=True)
+    elif scheduler.get_job("inbox-folder-scan"):
+        scheduler.remove_job("inbox-folder-scan")
+    if not scheduler.running:
+        scheduler.start()
+
+
+def update_background_scan_interval(interval_minutes: int) -> None:
+    """Apply a saved interval to the running worker when its folder is configured."""
+    inbox = Path(settings.inbox_scan_dir) if settings.inbox_scan_dir else None
+    if not scheduler.running or not inbox or not inbox.is_dir():
+        return
+    if scheduler.get_job("inbox-folder-scan"):
+        scheduler.reschedule_job("inbox-folder-scan", trigger="interval", minutes=interval_minutes)
+    else:
+        scheduler.add_job(scan_inbox_folder, "interval", minutes=interval_minutes,
+                          id="inbox-folder-scan", replace_existing=True)
+
+
+def stop_background_scheduler() -> None:
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
 
 
 def scan_inbox_folder() -> int:

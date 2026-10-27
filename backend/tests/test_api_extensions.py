@@ -46,6 +46,11 @@ def add_user(factory, email, role="accountant", password="old-password"):
         return user.id
 
 
+def test_bulk_clear_endpoint_is_not_exposed(api):
+    _, _, application = api
+    assert "/api/ledger/clear-all" not in application.openapi()["paths"]
+
+
 def test_change_password_validates_and_audits(api):
     client, factory, app = api
     user_id = add_user(factory, "accountant@example.test")
@@ -160,6 +165,30 @@ def test_po_delete_rejects_referenced_po(api):
     assert client.delete(f"/api/ledger/purchase-orders/{po_id}").status_code == 409
 
 
+def test_reject_invoice_is_saved_and_audited_by_backend(api):
+    client, factory, app = api
+    with factory() as db:
+        invoice = Invoice(original_name="reject.pdf", stored_path="/tmp/reject.pdf", status="needs_review")
+        db.add(invoice)
+        db.commit()
+        db.refresh(invoice)
+        invoice_id = invoice.id
+
+    # Only a chief accountant or admin may make the persisted rejection decision.
+    assert client.post(f"/api/invoices/{invoice_id}/reject", json={"reason": "Thiếu chứng từ"}).status_code == 403
+    app.state.identity.role = "chief_accountant"
+    response = client.post(f"/api/invoices/{invoice_id}/reject", json={"reason": "Thiếu chứng từ"})
+    assert response.status_code == 200, response.text
+    assert response.json()["invoice"]["status"] == "rejected"
+
+    with factory() as db:
+        saved = db.get(Invoice, invoice_id)
+        assert saved.status == "rejected"
+        assert saved.review_note == "Thiếu chứng từ"
+        audit = db.query(AuditEvent).filter_by(action="invoice.reject", entity_id=str(invoice_id)).one()
+        assert audit.detail == "Thiếu chứng từ"
+
+
 def test_gr_patch_delete_validation_and_permissions(api):
     client, factory, app = api
     with factory() as db:
@@ -174,3 +203,44 @@ def test_gr_patch_delete_validation_and_permissions(api):
     assert client.patch(f"/api/ledger/goods-receipts/{gr_id}", json={"receipt_number": "GR-4"}).status_code == 200
     assert client.delete(f"/api/ledger/goods-receipts/{gr_id}").status_code == 200
     assert client.delete(f"/api/ledger/goods-receipts/{gr_id}").status_code == 404
+
+
+def test_po_and_receipt_form_fields_are_saved_and_returned(api):
+    client, factory, _ = api
+    with factory() as db:
+        supplier = Supplier(tax_code="123456", name="Nhà cung cấp thật")
+        db.add(supplier)
+        db.commit()
+
+    po_response = client.post("/api/ledger/purchase-orders", json={
+        "po_number": "PO-PERSIST-1",
+        "supplier_tax_code": "123456",
+        "total_amount": 200,
+        "order_date": "2026-10-27",
+        "expected_delivery_date": "2026-11-02",
+        "employee_code": "EMP-01",
+        "lines": [{"name": "Bút", "unit": "Cây", "quantity": 2, "unit_price": 100}],
+    })
+    assert po_response.status_code == 201, po_response.text
+    po = po_response.json()
+    assert po["order_date"] == "2026-10-27"
+    assert po["expected_delivery_date"] == "2026-11-02"
+    assert po["employee_code"] == "EMP-01"
+    assert po["supplier_name"] == "Nhà cung cấp thật"
+
+    gr_response = client.post("/api/ledger/goods-receipts", json={
+        "receipt_number": "GR-PERSIST-1",
+        "po_number": "PO-PERSIST-1",
+        "received_by": "Nguyễn An",
+        "warehouse_location": "Kho A",
+        "lines": [{"name": "Bút", "unit": "Cây", "quantity": 2, "notes": "Nguyên hộp"}],
+    })
+    assert gr_response.status_code == 201, gr_response.text
+    receipt = gr_response.json()
+    assert receipt["received_by"] == "Nguyễn An"
+    assert receipt["warehouse_location"] == "Kho A"
+    assert receipt["supplier_name"] == "Nhà cung cấp thật"
+    assert receipt["lines"][0]["notes"] == "Nguyên hộp"
+
+    assert client.get("/api/ledger/purchase-orders").json()[0]["expected_delivery_date"] == "2026-11-02"
+    assert client.get("/api/ledger/goods-receipts").json()[0]["received_by"] == "Nguyễn An"

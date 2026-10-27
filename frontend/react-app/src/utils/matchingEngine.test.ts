@@ -7,6 +7,7 @@ import {
   validateInvoiceMath,
   evaluateLineItem,
   normalizeVietnamese,
+  calculateAverageConfidence,
 } from './matchingEngine.ts';
 import type { LineItem, RuleSettings } from '../types/index.ts';
 
@@ -100,4 +101,9 @@ test('evaluateLineItem detects price and quantity mismatches', () => {
 
 test('formatCurrencyVND formats accurately with VNĐ suffix', () => {
   assert.equal(formatCurrencyVND(15000000), '15.000.000 đ');
+});
+
+test('average OCR confidence ignores invoices without a confidence score', () => {
+  assert.equal(calculateAverageConfidence([80, null, 100, undefined]), 90);
+  assert.equal(calculateAverageConfidence([null, undefined]), null);
 });

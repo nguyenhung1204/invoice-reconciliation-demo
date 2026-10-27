@@ -4,19 +4,16 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from apscheduler.schedulers.background import BackgroundScheduler
 
-from app.api import auth, invoices, ledger, reports
+from app.api import accounting, auth, invoices, ledger, master_data, reports
 from app.core.config import settings
 from app.core.database import SessionLocal, engine
 from app.core.security import hash_password
-from app.models import User
-from app.services.scheduler import generate_daily_reconciliation_report, scan_inbox_folder
+from app.models import ReconciliationSetting, User
+from app.services.scheduler import start_background_scheduler, stop_background_scheduler
 from app.services.demo_seed import seed_public_demo
+from app.services.reconciliation_settings import get_reconciliation_settings
 from app.migrations.runner import upgrade_schema
-
-scheduler = BackgroundScheduler(daemon=True)
-
 
 def initialize():
     if settings.database_url.startswith("sqlite"):
@@ -25,6 +22,9 @@ def initialize():
             connection.commit()
     upgrade_schema(engine)
     with SessionLocal() as db:
+        if db.get(ReconciliationSetting, 1) is None:
+            db.add(ReconciliationSetting(id=1, **get_reconciliation_settings()))
+            db.commit()
         initial_users = (
             (settings.admin_email, settings.admin_password, "admin"),
             (settings.accountant_email, settings.accountant_password, "accountant"),
@@ -49,14 +49,13 @@ def initialize():
 async def lifespan(_: FastAPI):
     initialize()
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
-    scheduler.add_job(generate_daily_reconciliation_report, "cron", hour=1, minute=0,
-                      id="daily-reconciliation-report", replace_existing=True)
-    if settings.inbox_scan_dir:
-        scheduler.add_job(scan_inbox_folder, "interval", minutes=1, id="inbox-folder-scan", replace_existing=True)
-    scheduler.start()
+    from app.models import ReconciliationSetting
+    with SessionLocal() as db:
+        saved_settings = db.get(ReconciliationSetting, 1)
+        inbox_interval_minutes = saved_settings.rpa_scan_interval_minutes if saved_settings else 5
+    start_background_scheduler(inbox_interval_minutes)
     yield
-    if scheduler.running:
-        scheduler.shutdown(wait=False)
+    stop_background_scheduler()
 
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
@@ -81,6 +80,8 @@ app.add_middleware(
 
 app.include_router(auth.router, prefix="/api")
 app.include_router(ledger.router, prefix="/api")
+app.include_router(master_data.router, prefix="/api")
+app.include_router(accounting.router, prefix="/api")
 app.include_router(invoices.router, prefix="/api")
 app.include_router(reports.router, prefix="/api")
 
@@ -125,6 +126,14 @@ def live_frontend():
     raise HTTPException(404, "Giao diện React chưa được build.")
 
 
+@app.get("/change-password.html")
+def change_password_page():
+    target = frontend_dir / "change-password.html"
+    if target.is_file():
+        return FileResponse(target)
+    raise HTTPException(404, "Không tìm thấy trang đổi mật khẩu.")
+
+
 @app.get("/old")
 def old_removed():
     raise HTTPException(404, "Đường dẫn /old đã bị xóa hoàn toàn khỏi hệ thống.")
@@ -132,7 +141,8 @@ def old_removed():
 
 @app.get("/mock")
 def mock_frontend():
-    return FileResponse(frontend_dir / "index.html")
+    # Keep the old URL working, but never serve a second, disconnected UI.
+    return live_frontend()
 
 
 @app.get("/new")
@@ -145,12 +155,7 @@ def migration_candidate_frontend():
 
 @app.get("/{full_path:path}")
 def index(full_path: str = ""):
-    if full_path and not full_path.startswith("api/"):
-        target = frontend_dir / full_path
-        if target.is_file():
-            mime = "application/javascript" if full_path.endswith(".js") else (
-                "application/pdf" if full_path.endswith(".pdf") else None
-            )
-            return FileResponse(target, media_type=mime)
-    return FileResponse(frontend_dir / "index.html")
+    if full_path.startswith("api/"):
+        raise HTTPException(404, "Không tìm thấy API")
+    return live_frontend()
 

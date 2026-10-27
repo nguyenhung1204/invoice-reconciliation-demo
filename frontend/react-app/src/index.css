@@ -8,3 +8,34 @@
     font-family: 'JetBrains Mono', 'DejaVu Sans Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
 }
+
+.pdf-selectable-text-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: hidden;
+  opacity: 0.25;
+  line-height: 1;
+  text-align: initial;
+  text-size-adjust: none;
+  transform-origin: 0 0;
+  forced-color-adjust: none;
+  user-select: text;
+}
+
+.pdf-selectable-text-layer :is(span, br) {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0 0;
+}
+
+.pdf-selectable-text-layer span.markedContent {
+  top: 0;
+  height: 0;
+}
+
+.pdf-selectable-text-layer ::selection {
+  background: rgb(59 130 246 / 35%);
+}

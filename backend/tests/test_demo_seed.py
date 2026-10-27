@@ -6,7 +6,7 @@ from sqlalchemy import create_engine, func
 from sqlalchemy.orm import Session
 
 from app.core.database import Base
-from app.models import GoodsReceipt, Invoice, InvoiceItem, PurchaseOrder, Supplier
+from app.models import GoodsReceipt, Invoice, InvoiceItem, PurchaseOrder, ReconciliationSetting, Supplier
 from app.services.demo_seed import seed_public_demo
 from app.services.invoice_lines import invoice_items_for_api
 from app.services.reconciliation import reconcile
@@ -58,8 +58,8 @@ def _fixture_and_manifest(tmp_path):
             "receipt_number": "GR-DEMO-HD001",
             "po_number": "PO-DEMO-HD001",
             "lines": [
-                {"name": item_one["name"], "unit": "Cái", "quantity": 1},
-                {"name": item_two["name"], "unit": "Cái", "quantity": 1},
+                {"name": item_one["name"], "unit": "Cái", "quantity": 1, "notes": ""},
+                {"name": item_two["name"], "unit": "Cái", "quantity": 1, "notes": ""},
             ],
         },
     }
@@ -137,6 +137,9 @@ def test_initialize_seeds_public_demo_when_enabled(tmp_path, monkeypatch):
 
         with Session(engine) as db:
             assert db.query(func.count(Invoice.id)).scalar() == 1
+            settings_row = db.get(ReconciliationSetting, 1)
+            assert settings_row is not None
+            assert settings_row.currency_tolerance == 1
     finally:
         Base.metadata.drop_all(engine)
         engine.dispose()
@@ -179,6 +182,46 @@ def test_seed_public_demo_is_idempotent_and_preserves_edits(tmp_path):
         assert db.query(func.count(Invoice.id)).scalar() == 1
         assert db.query(func.count(InvoiceItem.id)).scalar() == 2
         assert db.query(Invoice).one().invoice_number == "ACCOUNTANT-EDIT-001"
+    finally:
+        db.close()
+        Base.metadata.drop_all(engine)
+        engine.dispose()
+
+
+def test_seed_public_demo_adds_missing_master_data_once_and_preserves_edits(tmp_path):
+    from app.models import AccountingVoucher, Customer, Employee, Product, ProductCategory
+
+    fixture_path, _ = _fixture_and_manifest(tmp_path)
+    engine, db = _engine_and_session(tmp_path)
+    try:
+        first = _seed(db, tmp_path, fixture_path)
+        category = db.query(ProductCategory).filter_by(code="DEMO-CAT-01").one()
+        product = db.query(Product).filter_by(sku="DEMO-PRODUCT-01").one()
+        customer = db.query(Customer).filter_by(code="DEMO-CUSTOMER-01").one()
+        employee = db.query(Employee).filter_by(code="DEMO-EMPLOYEE-01").one()
+        voucher = db.query(AccountingVoucher).filter_by(voucher_number="DEMO-PC-01").one()
+        assert product.category_id == category.id
+        assert first["product_categories_created"] == 1
+        assert first["products_created"] == 1
+        assert first["customers_created"] == 1
+        assert first["employees_created"] == 1
+        assert first["accounting_vouchers_created"] == 1
+        assert voucher.voucher_type == "CHI"
+
+        product.product_name = "Tên đã được người dùng sửa"
+        voucher.content = "Phiếu đã được người dùng sửa"
+        db.commit()
+        second = _seed(db, tmp_path, fixture_path)
+
+        assert second["product_categories_created"] == 0
+        assert second["products_created"] == 0
+        assert second["customers_created"] == 0
+        assert second["employees_created"] == 0
+        assert second["accounting_vouchers_created"] == 0
+        assert db.query(Product).filter_by(sku="DEMO-PRODUCT-01").one().product_name == "Tên đã được người dùng sửa"
+        assert db.query(AccountingVoucher).filter_by(voucher_number="DEMO-PC-01").one().content == "Phiếu đã được người dùng sửa"
+        assert db.query(Customer).filter_by(code=customer.code).count() == 1
+        assert db.query(Employee).filter_by(code=employee.code).count() == 1
     finally:
         db.close()
         Base.metadata.drop_all(engine)

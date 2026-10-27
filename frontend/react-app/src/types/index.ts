@@ -11,12 +11,17 @@ export interface UserProfile {
 
 export type ProcessingStatus =
   | 'WAITING'           // Đang trong hàng đợi
+  | 'OCR_PENDING'       // Được nhận từ inbox, chưa chạy OCR
   | 'OPENCV_PREPROCESS' // Đang tiền xử lý ảnh OpenCV
   | 'PADDLE_OCR'        // Đang trích xuất PaddleOCR
+  | 'OCR_DONE'          // OCR đã chạy xong, chờ người dùng rà soát
   | 'MATCHING'          // Đang đối soát 3 bên
   | 'NEED_CONFIRM'      // Cần xác nhận thủ công (Confidence < 85% hoặc cảnh báo nhẹ)
+  | 'OCR_REVIEWED'      // Kế toán đã xác nhận dữ liệu OCR trên PDF
   | 'MISMATCH'          // Phát hiện sai lệch (đơn giá, số lượng, thuế)
   | 'MATCHED'           // Khớp 3 bên hoàn toàn
+  | 'APPROVED'          // Đã phê duyệt thanh toán ở backend
+  | 'ARCHIVED'          // Đã lưu trữ ở backend
   | 'REJECTED';         // Đã từ chối
 
 export interface BoundingBox {
@@ -37,19 +42,19 @@ export interface LineItem {
   itemNameInvoice: string;
   itemNamePO: string;
   unit: string;
-  quantityInvoice: number;
-  quantityPO: number;
-  quantityGR: number;
-  unitPriceInvoice: number;
-  unitPricePO: number;
-  vatRate: number; // 8 hoặc 10
-  amountInvoice: number;
+  quantityInvoice: number | null;
+  quantityPO: number | null;
+  quantityGR: number | null;
+  unitPriceInvoice: number | null;
+  unitPricePO: number | null;
+  vatRate: number | null; // 8 hoặc 10
+  amountInvoice: number | null;
   fuzzyScore: number; // Điểm tương đồng xấp xỉ Levenshtein 0 - 100%
   isQuantityMismatch: boolean;
   isPriceMismatch: boolean;
   isMathMismatch: boolean;
   isFuzzyMismatch: boolean;
-  ocrConfidence: number;
+  ocrConfidence: number | null;
   boxId?: string;
 }
 
@@ -68,7 +73,7 @@ export interface AuditLog {
   invoiceCode: string;
   timestamp: string;
   user: string;
-  userRole: UserRole;
+  userRole: UserRole | 'UNKNOWN';
   field: string;
   oldValue: string;
   newValue: string;
@@ -89,12 +94,12 @@ export interface InvoiceHeader {
   poCode: string;            // PO-2026-0001
   grCode: string;            // PNK-2026-0001
   paymentMethod: string;     // Chuyển khoản (CK)
-  subTotal: number;
-  vatAmount: number;
-  grandTotal: number;
+  subTotal: number | null;
+  vatAmount: number | null;
+  grandTotal: number | null;
   qrCodeData: string;
-  taxStatus: 'ACTIVE' | 'TAX_RISK' | 'SUSPENDED';
-  ocrAverageConfidence: number; // %
+  taxStatus: 'ACTIVE' | 'TAX_RISK' | 'SUSPENDED' | 'UNKNOWN';
+  ocrAverageConfidence: number | null; // %
 }
 
 export interface InvoiceRecord {
@@ -166,7 +171,7 @@ export interface SupplierMaster {
   address: string;
   phone?: string;
   email?: string;
-  legalStatus: 'ACTIVE' | 'WARNING_HIGH_RISK' | 'CLOSED';
+  legalStatus: 'ACTIVE' | 'WARNING_HIGH_RISK' | 'CLOSED' | 'UNKNOWN';
   anchorKeywords: string[];  // Từ khóa nhận dạng mẫu hóa đơn (FPT, Petrolimex,...)
   totalInvoicesReceived: number;
   mismatchRate: number;      // %

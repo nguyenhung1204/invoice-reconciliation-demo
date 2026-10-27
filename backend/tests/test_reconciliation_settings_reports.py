@@ -39,8 +39,10 @@ def api(monkeypatch, tmp_path):
 def test_settings_defaults_role_validation_and_persistence(api):
     client, _, app = api
     assert client.get("/api/reports/settings").json() == {
-        "currency_tolerance": 1.0, "item_similarity_threshold": 90, "ocr_confidence_min": 0.8}
-    payload = {"currency_tolerance": 2.5, "item_similarity_threshold": 88, "ocr_confidence_min": 0.75}
+        "currency_tolerance": 1.0, "item_similarity_threshold": 90, "ocr_confidence_min": 0.8,
+        "rpa_scan_interval_minutes": 5, "auto_alert_email": True, "auto_alert_telegram": True}
+    payload = {"currency_tolerance": 2.5, "item_similarity_threshold": 88, "ocr_confidence_min": 0.75,
+               "rpa_scan_interval_minutes": 15, "auto_alert_email": False, "auto_alert_telegram": True}
     assert client.put("/api/reports/settings", json=payload).status_code == 403
     app.state.identity.role = "chief_accountant"
     assert client.put("/api/reports/settings", json={**payload, "item_similarity_threshold": 101}).status_code == 422
@@ -48,15 +50,42 @@ def test_settings_defaults_role_validation_and_persistence(api):
     assert client.get("/api/reports/settings").json() == payload
 
 
-def test_reconciliation_uses_saved_settings(api, monkeypatch):
+def test_saved_worker_interval_reschedules_and_is_reported(api, monkeypatch, tmp_path):
     client, _, app = api
+    app.state.identity.role = "admin"
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    monkeypatch.setattr(reports.settings, "inbox_scan_dir", str(inbox))
+    updated: list[int] = []
+    monkeypatch.setattr(reports, "update_background_scan_interval", updated.append)
+
+    response = client.put("/api/reports/settings", json={
+        "currency_tolerance": 1,
+        "item_similarity_threshold": 90,
+        "ocr_confidence_min": 0.8,
+        "rpa_scan_interval_minutes": 15,
+        "auto_alert_email": False,
+        "auto_alert_telegram": False,
+    })
+    assert response.status_code == 200
+    assert updated == [15]
+    assert client.get("/api/reports/worker").json() == {
+        "active": True,
+        "mode": "local_folder_poll",
+        "message": "Đang theo dõi thư mục inbox mỗi 15 phút",
+    }
+
+
+def test_reconciliation_uses_saved_settings(api, monkeypatch):
+    client, factory, app = api
     app.state.identity.role = "admin"
     client.put("/api/reports/settings", json={"currency_tolerance": 3, "item_similarity_threshold": 90,
                                                "ocr_confidence_min": 0.8})
     from app.services.reconciliation import reconcile
     invoice = SimpleNamespace(seller_tax_code="1", total_amount=22, items=[])
     order = SimpleNamespace(supplier_tax_code="1", total_amount=20, lines=[])
-    assert "AMOUNT_MISMATCH" not in {item["code"] for item in reconcile(invoice, order)}
+    with factory() as db:
+        assert "AMOUNT_MISMATCH" not in {item["code"] for item in reconcile(invoice, order, db=db)}
 
 
 def test_daily_report_job_and_download_route(api):

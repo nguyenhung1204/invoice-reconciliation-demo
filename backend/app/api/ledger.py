@@ -3,6 +3,7 @@ import io
 import json
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -16,19 +17,36 @@ router = APIRouter(prefix="/ledger", tags=["Module 2 · PO & Ledger"])
 class SupplierIn(BaseModel):
     tax_code: str
     name: str
+    supplier_code: str | None = None
+    address: str = ""
+    phone: str = ""
     email: str = ""
+
+
+class SupplierPatch(BaseModel):
+    tax_code: str | None = None
+    name: str | None = None
+    supplier_code: str | None = None
+    address: str | None = None
+    phone: str | None = None
+    email: str | None = None
 
 
 class POIn(BaseModel):
     po_number: str
     supplier_tax_code: str
     total_amount: float
+    order_date: str = ""
+    expected_delivery_date: str = ""
+    employee_code: str = ""
     lines: list[dict] = []
 
 
 class GRIn(BaseModel):
     receipt_number: str
     po_number: str
+    received_by: str = ""
+    warehouse_location: str = ""
     lines: list[dict] = []
 
 
@@ -37,12 +55,17 @@ class POUpdate(BaseModel):
     supplier_tax_code: str | None = None
     total_amount: float | None = Field(default=None, ge=0)
     status: str | None = None
+    order_date: str | None = None
+    expected_delivery_date: str | None = None
+    employee_code: str | None = None
     lines: list[dict] | None = None
 
 
 class GRUpdate(BaseModel):
     receipt_number: str | None = None
     po_number: str | None = None
+    received_by: str | None = None
+    warehouse_location: str | None = None
     lines: list[dict] | None = None
 
 
@@ -51,30 +74,101 @@ def record_audit(db, user, action, entity_type, entity_id, detail=""):
                       entity_id=str(entity_id), detail=detail))
 
 
+def serialize_purchase_order(row: PurchaseOrder):
+    return {
+        "id": row.id,
+        "po_number": row.po_number,
+        "supplier_tax_code": row.supplier_tax_code,
+        "supplier_name": row.supplier.name if row.supplier else "",
+        "total_amount": float(row.total_amount),
+        "status": row.status,
+        "order_date": row.order_date or "",
+        "expected_delivery_date": row.expected_delivery_date or "",
+        "created_by": row.created_by_user.email if row.created_by_user else "",
+        "employee_code": row.employee_code or "",
+        "lines": row.lines or [],
+    }
+
+
+def serialize_goods_receipt(row: GoodsReceipt):
+    supplier = row.purchase_order.supplier if row.purchase_order else None
+    return {
+        "id": row.id,
+        "receipt_number": row.receipt_number,
+        "po_number": row.po_number,
+        "supplier_name": supplier.name if supplier else "",
+        "lines": row.lines or [],
+        "received_at": row.received_at.isoformat(),
+        "received_by": row.received_by or "",
+        "warehouse_location": row.warehouse_location or "",
+    }
+
+
 @router.get("/suppliers")
 def suppliers(db: Session = Depends(get_db), _: User = Depends(current_user)):
-    return [{"id": x.id, "tax_code": x.tax_code, "name": x.name, "email": x.email} for x in db.query(Supplier).order_by(Supplier.name)]
+    return [{"id": x.id, "supplier_code": x.supplier_code, "tax_code": x.tax_code, "name": x.name,
+             "address": x.address or "", "phone": x.phone or "", "email": x.email} for x in db.query(Supplier).order_by(Supplier.name)]
 
 
 @router.post("/suppliers", status_code=201)
-def add_supplier(body: SupplierIn, db: Session = Depends(get_db), _: User = Depends(current_user)):
+def add_supplier(body: SupplierIn, db: Session = Depends(get_db), _: User = Depends(require_roles("admin", "chief_accountant"))):
     if db.query(Supplier).filter(Supplier.tax_code == body.tax_code).first():
         raise HTTPException(409, "Mã số thuế nhà cung cấp đã tồn tại")
+    if body.supplier_code and db.query(Supplier).filter(Supplier.supplier_code == body.supplier_code).first():
+        raise HTTPException(409, "Mã nhà cung cấp đã tồn tại")
     row = Supplier(**body.model_dump()); db.add(row); db.flush()
     record_audit(db, _, "supplier.create", "supplier", row.id, row.name)
     db.commit(); db.refresh(row)
-    return {"id": row.id, **body.model_dump()}
+    return {"id": row.id, "supplier_code": row.supplier_code, "tax_code": row.tax_code, "name": row.name,
+            "address": row.address, "phone": row.phone, "email": row.email}
+
+
+@router.patch("/suppliers/{supplier_id}")
+def update_supplier(supplier_id: int, body: SupplierPatch, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "chief_accountant"))):
+    row = db.get(Supplier, supplier_id)
+    if row is None:
+        raise HTTPException(404, "Không tìm thấy nhà cung cấp")
+    values = body.model_dump(exclude_unset=True)
+    if not values or any(value is None for value in values.values()):
+        raise HTTPException(422, "Cần cung cấp giá trị cập nhật hợp lệ")
+    for field in ("tax_code", "supplier_code"):
+        if field in values:
+            query = db.query(Supplier).filter(getattr(Supplier, field) == values[field], Supplier.id != supplier_id)
+            if query.first():
+                raise HTTPException(409, "Mã nhà cung cấp hoặc mã số thuế đã tồn tại")
+    for key, value in values.items():
+        setattr(row, key, value)
+    record_audit(db, user, "supplier.update", "supplier", row.id, ",".join(sorted(values)))
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, "Không thể cập nhật nhà cung cấp do trùng mã") from exc
+    db.refresh(row)
+    return {"id": row.id, "supplier_code": row.supplier_code, "tax_code": row.tax_code, "name": row.name,
+            "address": row.address or "", "phone": row.phone or "", "email": row.email}
+
+
+@router.delete("/suppliers/{supplier_id}")
+def delete_supplier(supplier_id: int, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "chief_accountant"))):
+    row = db.get(Supplier, supplier_id)
+    if row is None:
+        raise HTTPException(404, "Không tìm thấy nhà cung cấp")
+    if db.query(PurchaseOrder).filter_by(supplier_id=row.id).first() or db.query(Invoice).filter_by(seller_supplier_id=row.id).first():
+        raise HTTPException(409, "Không thể xóa nhà cung cấp đang được PO hoặc hóa đơn tham chiếu")
+    record_audit(db, user, "supplier.delete", "supplier", row.id, row.name)
+    db.delete(row)
+    db.commit()
+    return {"message": "Đã xóa nhà cung cấp"}
 
 
 @router.get("/purchase-orders")
 def purchase_orders(db: Session = Depends(get_db), _: User = Depends(current_user)):
-    return [{"id": x.id, "po_number": x.po_number, "supplier_tax_code": x.supplier_tax_code,
-             "total_amount": x.total_amount, "status": x.status, "lines": x.lines or []}
-            for x in db.query(PurchaseOrder).order_by(PurchaseOrder.created_at.desc())]
+    return [serialize_purchase_order(x) for x in db.query(PurchaseOrder).order_by(PurchaseOrder.created_at.desc())]
 
 
 @router.post("/purchase-orders", status_code=201)
-def add_purchase_order(body: POIn, db: Session = Depends(get_db), _: User = Depends(current_user)):
+def add_purchase_order(body: POIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
     if db.query(PurchaseOrder).filter(PurchaseOrder.po_number == body.po_number).first():
         raise HTTPException(409, "Số PO đã tồn tại")
     supplier = db.query(Supplier).filter_by(tax_code=body.supplier_tax_code).first()
@@ -85,6 +179,10 @@ def add_purchase_order(body: POIn, db: Session = Depends(get_db), _: User = Depe
         supplier_id=supplier.id,
         supplier_tax_code=supplier.tax_code,
         total_amount=body.total_amount,
+        order_date=body.order_date,
+        expected_delivery_date=body.expected_delivery_date,
+        created_by_user_id=getattr(user, "id", None),
+        employee_code=body.employee_code,
     )
     db.add(row); db.flush()
     try:
@@ -92,10 +190,9 @@ def add_purchase_order(body: POIn, db: Session = Depends(get_db), _: User = Depe
     except ValueError as exc:
         db.rollback()
         raise HTTPException(422, str(exc)) from exc
-    record_audit(db, _, "purchase_order.create", "purchase_order", row.id, row.po_number)
+    record_audit(db, user, "purchase_order.create", "purchase_order", row.id, row.po_number)
     db.commit(); db.refresh(row)
-    return {"id": row.id, "po_number": row.po_number, "supplier_tax_code": row.supplier_tax_code,
-            "total_amount": float(row.total_amount), "lines": row.lines, "status": row.status}
+    return serialize_purchase_order(row)
 
 
 @router.patch("/purchase-orders/{po_id}")
@@ -133,8 +230,7 @@ def update_purchase_order(po_id: int, body: POUpdate, db: Session = Depends(get_
             invoice.po_reference_text = row.po_number
     record_audit(db, user, "purchase_order.update", "purchase_order", row.id, ",".join(sorted(values)))
     db.commit(); db.refresh(row)
-    return {"id": row.id, "po_number": row.po_number, "supplier_tax_code": row.supplier_tax_code,
-            "total_amount": row.total_amount, "status": row.status, "lines": row.lines or []}
+    return serialize_purchase_order(row)
 
 
 @router.delete("/purchase-orders/{po_id}")
@@ -151,12 +247,11 @@ def delete_purchase_order(po_id: int, db: Session = Depends(get_db), user: User 
 
 @router.get("/goods-receipts")
 def goods_receipts(db: Session = Depends(get_db), _: User = Depends(current_user)):
-    return [{"id": x.id, "receipt_number": x.receipt_number, "po_number": x.po_number,
-             "lines": x.lines or [], "received_at": x.received_at.isoformat()} for x in db.query(GoodsReceipt).order_by(GoodsReceipt.received_at.desc())]
+    return [serialize_goods_receipt(x) for x in db.query(GoodsReceipt).order_by(GoodsReceipt.received_at.desc())]
 
 
 @router.post("/goods-receipts", status_code=201)
-def add_goods_receipt(body: GRIn, db: Session = Depends(get_db), _: User = Depends(current_user)):
+def add_goods_receipt(body: GRIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
     purchase_order = db.query(PurchaseOrder).filter(PurchaseOrder.po_number == body.po_number).first()
     if not purchase_order:
         raise HTTPException(404, "Không tìm thấy PO")
@@ -167,6 +262,8 @@ def add_goods_receipt(body: GRIn, db: Session = Depends(get_db), _: User = Depen
         po_id=purchase_order.id,
         po_number=purchase_order.po_number,
         purchase_order=purchase_order,
+        received_by=body.received_by,
+        warehouse_location=body.warehouse_location,
     )
     db.add(row); db.flush()
     try:
@@ -174,10 +271,9 @@ def add_goods_receipt(body: GRIn, db: Session = Depends(get_db), _: User = Depen
     except ValueError as exc:
         db.rollback()
         raise HTTPException(422, str(exc)) from exc
-    record_audit(db, _, "goods_receipt.create", "goods_receipt", row.id, row.receipt_number)
+    record_audit(db, user, "goods_receipt.create", "goods_receipt", row.id, row.receipt_number)
     db.commit(); db.refresh(row)
-    return {"id": row.id, "receipt_number": row.receipt_number, "po_number": row.po_number,
-            "lines": row.lines, "received_at": row.received_at.isoformat()}
+    return serialize_goods_receipt(row)
 
 
 @router.patch("/goods-receipts/{receipt_id}")
@@ -210,8 +306,7 @@ def update_goods_receipt(receipt_id: int, body: GRUpdate, db: Session = Depends(
             raise HTTPException(422, str(exc)) from exc
     record_audit(db, user, "goods_receipt.update", "goods_receipt", row.id, ",".join(sorted(values)))
     db.commit(); db.refresh(row)
-    return {"id": row.id, "receipt_number": row.receipt_number, "po_number": row.po_number,
-            "lines": row.lines or [], "received_at": row.received_at.isoformat()}
+    return serialize_goods_receipt(row)
 
 
 @router.delete("/goods-receipts/{receipt_id}")
@@ -256,7 +351,11 @@ async def import_ledger(kind: str, file: UploadFile = File(...), db: Session = D
                 lines = json.loads(raw_lines) if isinstance(raw_lines, str) and raw_lines.strip() else []
                 if not isinstance(lines, list): skipped += 1; continue
                 po = PurchaseOrder(po_number=key, supplier_id=supplier.id, supplier_tax_code=supplier.tax_code,
-                                   total_amount=float(row.get("total_amount", 0) or 0))
+                                   total_amount=float(row.get("total_amount", 0) or 0),
+                                   order_date=str(row.get("order_date", "") or ""),
+                                   expected_delivery_date=str(row.get("expected_delivery_date", "") or ""),
+                                   employee_code=str(row.get("employee_code", "") or ""),
+                                   created_by_user_id=getattr(user, "id", None))
                 sync_purchase_order_lines(po, lines)
                 db.add(po)
             else:
@@ -269,7 +368,9 @@ async def import_ledger(kind: str, file: UploadFile = File(...), db: Session = D
                 lines = json.loads(raw_lines) if isinstance(raw_lines, str) and raw_lines.strip() else []
                 if not isinstance(lines, list): skipped += 1; continue
                 receipt = GoodsReceipt(receipt_number=key, po_number=po_number, po_id=purchase_order.id,
-                                       purchase_order=purchase_order)
+                                       purchase_order=purchase_order,
+                                       received_by=str(row.get("received_by", "") or ""),
+                                       warehouse_location=str(row.get("warehouse_location", "") or ""))
                 sync_goods_receipt_lines(receipt, lines)
                 db.add(receipt)
             created += 1
@@ -278,20 +379,3 @@ async def import_ledger(kind: str, file: UploadFile = File(...), db: Session = D
     record_audit(db, user, "ledger.import", kind, "bulk", f"created={created};skipped={skipped}")
     db.commit()
     return {"created": created, "skipped": skipped, "total_rows": len(rows)}
-
-
-@router.post("/clear-all")
-def clear_all(db: Session = Depends(get_db), _: User = Depends(require_roles("admin"))):
-    from app.models import GoodsReceiptItem, Invoice, PurchaseOrderItem
-    from app.services.invoice_lifecycle import delete_invoice_dependents
-
-    for (invoice_id,) in db.query(Invoice.id).all():
-        delete_invoice_dependents(db, invoice_id)
-    db.query(Invoice).delete(synchronize_session=False)
-    db.query(GoodsReceiptItem).delete(synchronize_session=False)
-    db.query(GoodsReceipt).delete()
-    db.query(PurchaseOrderItem).delete(synchronize_session=False)
-    db.query(PurchaseOrder).delete()
-    db.query(Supplier).delete()
-    db.commit()
-    return {"message": "Đã xóa toàn bộ dữ liệu đơn hàng và hóa đơn."}

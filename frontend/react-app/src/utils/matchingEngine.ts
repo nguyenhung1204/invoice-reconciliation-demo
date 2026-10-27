@@ -67,12 +67,18 @@ export function calculateFuzzyScore(a: string, b: string): number {
 /**
  * Định dạng tiền tệ VNĐ chuẩn kế toán
  */
-export function formatCurrencyVND(amount: number): string {
-  if (amount === undefined || amount === null || isNaN(amount)) return '0 đ';
+export function formatCurrencyVND(amount: number | null | undefined): string {
+  if (amount === undefined || amount === null || isNaN(amount)) return '—';
   return new Intl.NumberFormat('vi-VN', {
     style: 'decimal',
     maximumFractionDigits: 0,
   }).format(amount) + ' đ';
+}
+
+export function calculateAverageConfidence(values: Array<number | null | undefined>): number | null {
+  const available = values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+  if (available.length === 0) return null;
+  return available.reduce((sum, value) => sum + value, 0) / available.length;
 }
 
 /**
@@ -103,14 +109,22 @@ export function evaluateLineItem(
   evaluatedItem: LineItem;
   anomalies: AnomalyItem[];
 } {
-  const fuzzy = calculateFuzzyScore(item.itemNameInvoice, item.itemNamePO);
-  const isFuzzyMismatch = fuzzy < settings.fuzzyMatchingThresholdPct;
-  const isQuantityMismatch = item.quantityInvoice !== item.quantityPO || item.quantityInvoice !== item.quantityGR;
-  const isPriceMismatch = Math.abs(item.unitPriceInvoice - item.unitPricePO) > settings.toleranceThresholdVnd;
+  const hasInvoiceName = Boolean(item.itemNameInvoice.trim());
+  const hasPoName = Boolean(item.itemNamePO.trim());
+  const fuzzy = hasInvoiceName && hasPoName ? calculateFuzzyScore(item.itemNameInvoice, item.itemNamePO) : 0;
+  const isFuzzyMismatch = hasInvoiceName && hasPoName && fuzzy < settings.fuzzyMatchingThresholdPct;
+  const isQuantityMismatch = item.quantityInvoice != null && (
+    (item.quantityPO != null && item.quantityInvoice !== item.quantityPO)
+    || (item.quantityGR != null && item.quantityInvoice !== item.quantityGR)
+  );
+  const isPriceMismatch = item.unitPriceInvoice != null && item.unitPricePO != null
+    && Math.abs(item.unitPriceInvoice - item.unitPricePO) > settings.toleranceThresholdVnd;
 
   // Kiểm tra nhân chéo nội tại dòng hàng
-  const expectedAmount = item.quantityInvoice * item.unitPriceInvoice;
-  const isMathMismatch = Math.abs(item.amountInvoice - expectedAmount) > settings.toleranceThresholdVnd;
+  const expectedAmount = item.quantityInvoice != null && item.unitPriceInvoice != null
+    ? item.quantityInvoice * item.unitPriceInvoice : null;
+  const isMathMismatch = item.amountInvoice != null && expectedAmount != null
+    && Math.abs(item.amountInvoice - expectedAmount) > settings.toleranceThresholdVnd;
 
   const anomalies: AnomalyItem[] = [];
 
@@ -158,7 +172,7 @@ export function evaluateLineItem(
     });
   }
 
-  if (item.ocrConfidence < settings.ocrConfidenceThresholdPct) {
+  if (item.ocrConfidence != null && item.ocrConfidence < settings.ocrConfidenceThresholdPct) {
     anomalies.push({
       id: `ANOM-OCR-${item.lineNo}`,
       type: 'LOW_OCR_CONFIDENCE',

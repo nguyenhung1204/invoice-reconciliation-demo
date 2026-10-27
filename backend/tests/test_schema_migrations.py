@@ -63,9 +63,13 @@ def test_upgrade_backfills_fk_links_and_normalized_lines_without_duplicate_invoi
             assert tuple(invoice) == (13, 7, 3)
             assert connection.execute(text("SELECT COUNT(*) FROM purchase_order_items WHERE po_id=7")).scalar_one() == 2
             assert connection.execute(text("SELECT COUNT(*) FROM goods_receipt_items WHERE gr_id=11")).scalar_one() == 2
+            assert connection.execute(text("SELECT notes FROM goods_receipt_items WHERE gr_id=11 ORDER BY id LIMIT 1")).scalar_one() == ""
             assert connection.execute(text("SELECT COUNT(*) FROM invoice_items WHERE invoice_id=13")).scalar_one() == 2
             assert connection.execute(text("SELECT COUNT(*) FROM invoice_files WHERE invoice_id=13 AND sha256='abc123'")).scalar_one() == 1
             assert connection.execute(text("SELECT COUNT(*) FROM schema_migrations WHERE revision='0001_normalize_operational_data'")).scalar_one() == 1
+            invoice_columns = {column["name"] for column in inspect(engine).get_columns("invoices")}
+            assert {"seller_name", "invoice_series"}.issubset(invoice_columns)
+            assert connection.execute(text("SELECT invoice_number FROM invoices WHERE id=13")).scalar_one() == "1C22THT / 506572"
     finally:
         engine.dispose()
 
@@ -80,7 +84,21 @@ def test_upgrade_is_idempotent(tmp_path):
             assert connection.execute(text("SELECT COUNT(*) FROM goods_receipt_items")).scalar_one() == 2
             assert connection.execute(text("SELECT COUNT(*) FROM invoice_files")).scalar_one() == 1
             revisions = set(connection.execute(text("SELECT revision FROM schema_migrations")).scalars())
-            assert revisions == {"0001_normalize_operational_data", "0002_preserve_reconciliation_snapshots"}
+            assert revisions == {
+                "0001_normalize_operational_data",
+                "0002_preserve_reconciliation_snapshots",
+                "0003_persist_master_data",
+                "0004_persist_invoice_header_fields",
+                "0005_persist_settings_options",
+                "0006_persist_procurement_metadata",
+            }
+            po_columns = {column["name"] for column in inspect(engine).get_columns("purchase_orders")}
+            gr_columns = {column["name"] for column in inspect(engine).get_columns("goods_receipts")}
+            gr_item_columns = {column["name"] for column in inspect(engine).get_columns("goods_receipt_items")}
+            assert {"order_date", "expected_delivery_date", "created_by_user_id", "employee_code"}.issubset(po_columns)
+            assert {"received_by", "warehouse_location"}.issubset(gr_columns)
+            assert "notes" in gr_item_columns
+            assert connection.execute(text("SELECT notes FROM goods_receipt_items WHERE gr_id=11 ORDER BY id LIMIT 1")).scalar_one() == ""
     finally:
         engine.dispose()
 
@@ -131,7 +149,7 @@ def test_upgrade_creates_current_schema_from_empty_database(tmp_path):
             "invoice_approvals",
             "invoice_payments",
         }.issubset(tables)
-        independent_roots = {"schema_migrations", "users", "suppliers", "products", "datasets"}
+        independent_roots = {"schema_migrations", "users", "suppliers", "products", "product_categories", "customers", "employees", "datasets"}
         for table in tables - independent_roots:
             assert inspect(engine).get_foreign_keys(table), f"{table} must connect to the invoice workflow"
     finally:

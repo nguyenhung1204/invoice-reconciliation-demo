@@ -3,23 +3,21 @@ import {
   FileCheck2,
   AlertTriangle,
   Zap,
-  TrendingUp,
   Cpu,
-  ShieldAlert,
-  Clock,
   ArrowUpRight,
-  Filter,
   CheckCircle,
-  XCircle,
   Building2,
   Calendar,
 } from 'lucide-react';
-import { InvoiceRecord, RpaScanLog, SupplierMaster } from '../../types/index.ts';
+import { InvoiceRecord, SupplierMaster } from '../../types/index.ts';
+import { calculateAverageConfidence } from '../../utils/matchingEngine.ts';
+import { filterByDateRange, getDashboardDateRange, getMonthPeriod } from '../../utils/dashboardMetrics.ts';
+import type { WorkerStatusDTO } from '../../services/api.ts';
 
 interface DashboardModuleProps {
   invoices: InvoiceRecord[];
   suppliers: SupplierMaster[];
-  rpaLogs: RpaScanLog[];
+  workerStatus: WorkerStatusDTO | null;
   onSelectInvoice: (code: string) => void;
   onNavigateToMatching: () => void;
   onNavigateToQueue: () => void;
@@ -28,78 +26,91 @@ interface DashboardModuleProps {
 export const DashboardModule: React.FC<DashboardModuleProps> = ({
   invoices,
   suppliers,
-  rpaLogs,
+  workerStatus,
   onSelectInvoice,
   onNavigateToMatching,
   onNavigateToQueue,
 }) => {
-  // Tính toán số liệu thống kê thực tế
-  const totalInvoices = invoices.length;
-  const matchedCount = invoices.filter((i) => i.status === 'MATCHED').length;
-  const mismatchCount = invoices.filter((i) => i.status === 'MISMATCH').length;
-  const needConfirmCount = invoices.filter((i) => i.status === 'NEED_CONFIRM').length;
+  const currentMonth = getMonthPeriod();
+  const now = new Date();
+  const previousMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const previousMonth = getMonthPeriod(previousMonthDate);
+  const [selectedPeriod, setSelectedPeriod] = useState<string>(currentMonth);
+  const [customStartDate, setCustomStartDate] = useState<string>(() => getDashboardDateRange(currentMonth, '', '').start || '');
+  const [customEndDate, setCustomEndDate] = useState<string>(() => getDashboardDateRange(currentMonth, '', '').end || '');
+  const customRangeSelected = selectedPeriod === 'CUSTOM';
+  const periodRange = getDashboardDateRange(selectedPeriod, customStartDate, customEndDate);
+  const periodInvoices = filterByDateRange(invoices, (invoice) => invoice.receivedAt, periodRange);
 
-  const autoMatchRate = invoices.length > 0
-    ? (Math.round((matchedCount / invoices.length) * 1000) / 10).toFixed(1)
-    : '0.0';
-  const avgOcrConfidence = invoices.length > 0
-    ? (
-        invoices.reduce((sum, i) => sum + i.header.ocrAverageConfidence, 0) /
-        invoices.length
-      ).toFixed(1)
-    : '0.0';
+  const totalInvoices = periodInvoices.length;
+  const matchedCount = periodInvoices.filter((invoice) => invoice.status === 'MATCHED' || invoice.status === 'APPROVED').length;
+  const mismatchCount = periodInvoices.filter((invoice) => invoice.status === 'MISMATCH').length;
+  const needConfirmCount = periodInvoices.filter((invoice) => invoice.status === 'NEED_CONFIRM').length;
+  const waitingOcrCount = periodInvoices.filter((invoice) => invoice.status === 'OCR_PENDING').length;
+  const autoMatchRate = totalInvoices > 0 ? (Math.round((matchedCount / totalInvoices) * 1000) / 10).toFixed(1) : '0.0';
+  const avgOcrConfidence = calculateAverageConfidence(periodInvoices.map((invoice) => invoice.header.ocrAverageConfidence));
 
-  // Phân tích cơ cấu sai lệch thực tế từ danh sách hóa đơn
   const anomalyMap: Record<string, { label: string; count: number; color: string }> = {
-    PRICE_MISMATCH: { label: 'Lệch đơn giá hợp đồng (PO)', count: 0, color: 'bg-rose-500' },
-    QUANTITY_MISMATCH: { label: 'Lệch số lượng thực nhập (GR)', count: 0, color: 'bg-amber-500' },
-    MATH_ERROR: { label: 'Sai công thức thuế / tiền TT78', count: 0, color: 'bg-purple-500' },
-    SHA256_DUPLICATE: { label: 'Trùng mã băm SHA-256', count: 0, color: 'bg-blue-500' },
-    NO_PO_MATCH: { label: 'Chưa liên kết PO tham chiếu', count: 0, color: 'bg-slate-400' },
+    PRICE_MISMATCH: { label: 'Lệch đơn giá PO', count: 0, color: 'bg-rose-500' },
+    QUANTITY_MISMATCH: { label: 'Lệch số lượng', count: 0, color: 'bg-amber-500' },
+    MATH_ERROR: { label: 'Sai tổng tiền / phép tính', count: 0, color: 'bg-purple-500' },
+    LOW_OCR_CONFIDENCE: { label: 'Điểm OCR thấp', count: 0, color: 'bg-indigo-500' },
+    NO_PO: { label: 'Chưa liên kết PO', count: 0, color: 'bg-slate-400' },
+    OTHER: { label: 'Sai lệch khác', count: 0, color: 'bg-blue-500' },
   };
-
+  const anomalyGroupByType: Record<string, string> = {
+    PRICE_MISMATCH: 'PRICE_MISMATCH',
+    QUANTITY_MISMATCH: 'QUANTITY_MISMATCH',
+    QTY_MISMATCH: 'QUANTITY_MISMATCH',
+    GR_QUANTITY_MISMATCH: 'QUANTITY_MISMATCH',
+    DELIVERY_SHORT: 'QUANTITY_MISMATCH',
+    DELIVERY_WRONG: 'QUANTITY_MISMATCH',
+    MATH_ERROR: 'MATH_ERROR',
+    AMOUNT_MISMATCH: 'MATH_ERROR',
+    LINE_AMOUNT_MISMATCH: 'MATH_ERROR',
+    LOW_OCR_CONFIDENCE: 'LOW_OCR_CONFIDENCE',
+    NO_PO: 'NO_PO',
+    NO_PO_MATCH: 'NO_PO',
+  };
   let totalAnomalyCount = 0;
-  invoices.forEach((inv) => {
-    inv.anomalies.forEach((a) => {
+  periodInvoices.forEach((invoice) => {
+    invoice.anomalies.forEach((anomaly) => {
       totalAnomalyCount++;
-      const key = a.type in anomalyMap ? a.type : 'NO_PO_MATCH';
+      const key = anomalyGroupByType[anomaly.type] || 'OTHER';
       anomalyMap[key].count++;
     });
   });
-
   const anomalyBreakdown = Object.values(anomalyMap)
-    .filter((item) => totalAnomalyCount === 0 || item.count > 0)
-    .map((item) => ({
-      ...item,
-      pct: totalAnomalyCount > 0 ? Math.round((item.count / totalAnomalyCount) * 100) : 0,
-    }));
+    .filter((item) => item.count > 0)
+    .map((item) => ({ ...item, pct: totalAnomalyCount > 0 ? Math.round((item.count / totalAnomalyCount) * 100) : 0 }));
 
-  // Dữ liệu phân bổ theo ngày thực tế từ hóa đơn
-  const dateGroups: Record<string, { matched: number; mismatch: number; needConfirm: number }> = {};
-  invoices.forEach((inv) => {
-    const rawDate = inv.header.issueDate || inv.receivedAt?.slice(0, 10) || 'Hôm nay';
-    if (!dateGroups[rawDate]) {
-      dateGroups[rawDate] = { matched: 0, mismatch: 0, needConfirm: 0 };
-    }
-    if (inv.status === 'MATCHED') dateGroups[rawDate].matched++;
-    else if (inv.status === 'MISMATCH') dateGroups[rawDate].mismatch++;
-    else if (inv.status === 'NEED_CONFIRM') dateGroups[rawDate].needConfirm++;
+  const sevenDayBuckets: Record<string, { matched: number; mismatch: number; needConfirm: number }> = {};
+  const recentDays = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date();
+    date.setDate(date.getDate() - (6 - index));
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    sevenDayBuckets[key] = { matched: 0, mismatch: 0, needConfirm: 0 };
+    return { key, label: date.toLocaleDateString('vi-VN', { weekday: 'short', day: '2-digit' }) };
   });
+  invoices.forEach((invoice) => {
+    const bucket = sevenDayBuckets[invoice.receivedAt?.slice(0, 10) || ''];
+    if (!bucket) return;
+    if (invoice.status === 'MATCHED' || invoice.status === 'APPROVED') bucket.matched++;
+    else if (invoice.status === 'MISMATCH') bucket.mismatch++;
+    else if (invoice.status === 'NEED_CONFIRM') bucket.needConfirm++;
+  });
+  const weeklyData = recentDays.map(({ key, label }) => ({ day: label, ...sevenDayBuckets[key] }));
 
-  const weeklyData = Object.keys(dateGroups).length > 0
-    ? Object.entries(dateGroups)
-        .sort((a, b) => a[0].localeCompare(b[0]))
-        .slice(-7)
-        .map(([day, stats]) => ({
-          day,
-          ...stats,
-        }))
-    : [{ day: 'Hôm nay', matched: matchedCount, mismatch: mismatchCount, needConfirm: needConfirmCount }];
-
-  const [selectedPeriod, setSelectedPeriod] = useState<string>('2026-10');
-  const [customStartDate, setCustomStartDate] = useState<string>('2026-10-01');
-  const [customEndDate, setCustomEndDate] = useState<string>('2026-10-31');
-  const [showCustomDate, setShowCustomDate] = useState<boolean>(false);
+  const supplierMetrics = suppliers.map((supplier) => {
+    const supplierInvoices = periodInvoices.filter((invoice) => invoice.header.sellerTaxCode === supplier.taxCode);
+    const reviewed = supplierInvoices.filter((invoice) => ['MATCHED', 'APPROVED', 'MISMATCH'].includes(invoice.status));
+    const mismatched = reviewed.filter((invoice) => invoice.status === 'MISMATCH').length;
+    return {
+      supplier,
+      invoiceCount: supplierInvoices.length,
+      mismatchRate: reviewed.length > 0 ? Math.round((mismatched / reviewed.length) * 1000) / 10 : null,
+    };
+  }).sort((a, b) => b.invoiceCount - a.invoiceCount).slice(0, 5);
 
   return (
     <div className="space-y-6">
@@ -108,34 +119,31 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
         <div>
           <h1 className="text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
             <Cpu className="h-6 w-6 text-blue-600" />
-            Dashboard Thống Kê & Giám Sát Tiến Trình RPA
+            Dashboard Thống Kê
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Giám sát quy trình tự động trích xuất OCR và đối soát 3 bên theo Thông tư 78/2021/TT-BTC
+            Số liệu lấy từ danh sách hóa đơn và thông tin máy chủ hiện có
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <div className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 shadow-2xs">
             <Calendar className="h-3.5 w-3.5 text-blue-600 shrink-0" />
-            <span className="text-slate-500 font-medium">Kỳ kế toán:</span>
+            <span className="text-slate-500 font-medium">Ngày tiếp nhận:</span>
             <select
               value={selectedPeriod}
               onChange={(e) => {
                 setSelectedPeriod(e.target.value);
-                setShowCustomDate(e.target.value === 'CUSTOM');
               }}
               className="bg-transparent font-bold text-slate-900 focus:outline-none cursor-pointer pr-1"
             >
-              <option value="2026-10">Tháng 10/2026 (Kỳ hiện tại)</option>
-              <option value="2026-09">Tháng 09/2026</option>
-              <option value="2026-08">Tháng 08/2026</option>
-              <option value="2026-Q4">Quý IV / 2026</option>
-              <option value="2026-Q3">Quý III / 2026</option>
-              <option value="2026-YEAR">Cả năm 2026</option>
+              <option value={currentMonth}>Tháng này</option>
+              <option value={previousMonth}>Tháng trước</option>
+              <option value="LAST_90_DAYS">90 ngày gần nhất</option>
+              <option value="ALL">Toàn bộ thời gian</option>
               <option value="CUSTOM">Tùy chọn khoảng ngày...</option>
             </select>
           </div>
-          {showCustomDate && (
+          {customRangeSelected && (
             <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs shadow-2xs animate-fade-in">
               <input
                 type="date"
@@ -174,19 +182,16 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
           </div>
           <div className="mt-3 flex items-baseline gap-2">
             <span className="text-2xl font-bold text-slate-900">{totalInvoices}</span>
-            <span className="text-xs font-medium text-emerald-600 flex items-center">
-              <TrendingUp className="h-3.5 w-3.5 mr-0.5" /> +14.2%
-            </span>
           </div>
           <div className="mt-1 text-[11px] text-slate-500">
-            Tiếp nhận qua Email IMAP & Thư mục SMB
+            Hóa đơn thuộc khoảng ngày đã chọn
           </div>
         </div>
 
         {/* KPI 2 */}
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase">Tỷ lệ khớp tự động</span>
+            <span className="text-xs font-semibold text-slate-500 uppercase">Tỷ lệ hóa đơn đã khớp</span>
             <span className="rounded-lg bg-emerald-50 p-2 text-emerald-600">
               <CheckCircle className="h-5 w-5" />
             </span>
@@ -194,11 +199,11 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
           <div className="mt-3 flex items-baseline gap-2">
             <span className="text-2xl font-bold text-emerald-600">{autoMatchRate}%</span>
             <span className="text-xs font-medium text-slate-600">
-              (Độ tin cậy OCR TB: <strong className="text-blue-700">{avgOcrConfidence}%</strong>)
+              (Độ tin cậy OCR TB: <strong className="text-blue-700">{avgOcrConfidence == null ? '—' : `${avgOcrConfidence.toFixed(1)}%`}</strong>)
             </span>
           </div>
           <div className="mt-1 text-[11px] text-slate-500">
-            Khớp cả 3 tiêu chí: Đơn giá, Số lượng & Thuế GTGT
+            Trạng thái theo kết quả đối soát đã lưu
           </div>
         </div>
 
@@ -230,17 +235,17 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
         {/* KPI 4 */}
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase">Tốc độ xử lý RPA + OCR</span>
+            <span className="text-xs font-semibold text-slate-500 uppercase">Chờ xử lý OCR</span>
             <span className="rounded-lg bg-indigo-50 p-2 text-indigo-600">
               <Zap className="h-5 w-5" />
             </span>
           </div>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-indigo-600">3.6 giây</span>
-            <span className="text-xs font-medium text-slate-400">/ hóa đơn</span>
+            <span className="text-2xl font-bold text-indigo-600">{waitingOcrCount}</span>
+            <span className="text-xs font-medium text-slate-400">hóa đơn</span>
           </div>
           <div className="mt-1 text-[11px] text-slate-500">
-            Nhanh gấp <strong className="text-emerald-600">66 lần</strong> so với kiểm tra thủ công (4 phút)
+            Chưa lưu thời gian xử lý OCR để tính tốc độ trung bình
           </div>
         </div>
       </div>
@@ -252,7 +257,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
           <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
             <div>
               <h2 className="text-sm font-bold text-slate-900">
-                Xu hướng Đối soát Hóa đơn 7 ngày gần nhất
+                Hóa đơn tiếp nhận trong 7 ngày gần nhất
               </h2>
               <p className="text-xs text-slate-500">
                 Phân bổ theo trạng thái Khớp hoàn toàn, Phát hiện sai lệch và Cần xác nhận
@@ -275,9 +280,9 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
           <div className="space-y-4 pt-2">
             {weeklyData.map((item) => {
               const total = item.matched + item.mismatch + item.needConfirm;
-              const matchedPct = (item.matched / total) * 100;
-              const mismatchPct = (item.mismatch / total) * 100;
-              const needConfirmPct = (item.needConfirm / total) * 100;
+              const matchedPct = total > 0 ? (item.matched / total) * 100 : 0;
+              const mismatchPct = total > 0 ? (item.mismatch / total) * 100 : 0;
+              const needConfirmPct = total > 0 ? (item.needConfirm / total) * 100 : 0;
 
               return (
                 <div key={item.day} className="flex items-center gap-3 text-xs">
@@ -352,86 +357,31 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
         </div>
       </div>
 
-      {/* Hàng 3: Khung Giám sát RPA Worker (APScheduler) & Top Nhà cung cấp */}
+      {/* Hàng 3: trạng thái tác vụ và thống kê nhà cung cấp */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Khung Giám sát RPA Worker & Bộ lọc Tiếp nhận Tự động 4 Tầng */}
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
             <div>
               <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <Cpu className="h-4 w-4 text-blue-600" />
-                Tiến trình Ngầm APScheduler & Bộ lọc 4 Tầng
+                Tác vụ tiếp nhận tự động
               </h2>
-              <p className="text-xs text-slate-500">Giám sát hoạt động của 2 cron job tự động hóa</p>
+              <p className="text-xs text-slate-500">Trạng thái worker do máy chủ trả về</p>
             </div>
-            <span className="rounded-full bg-emerald-100 text-emerald-800 px-2.5 py-0.5 text-[11px] font-bold">
-              Scheduler Active
+            <span className={workerStatus?.active ? 'rounded-full bg-emerald-100 text-emerald-800 px-2.5 py-0.5 text-[11px] font-bold' : 'rounded-full bg-slate-100 text-slate-600 px-2.5 py-0.5 text-[11px] font-bold'}>
+              {workerStatus ? (workerStatus.active ? 'Đang theo dõi' : 'Chưa cấu hình') : 'Chưa có trạng thái'}
             </span>
           </div>
-
-          {/* 2 Cron Jobs Info */}
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
-                <Clock className="h-3.5 w-3.5 text-blue-600" />
-                Job 1: Quét Mail & SMB
-              </div>
-              <div className="text-[11px] text-slate-500 mt-1">Chu kỳ: Mỗi 5 phút (Interval)</div>
-              <div className="text-[11px] text-emerald-600 font-medium mt-0.5">● Hoạt động bình thường</div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <div className="text-xs font-semibold text-slate-800">
+              {workerStatus?.mode === 'local_folder_poll' ? 'Quét thư mục inbox cục bộ' : 'Quét thư mục inbox'}
             </div>
-
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
-                <Clock className="h-3.5 w-3.5 text-indigo-600" />
-                Job 2: Tổng hợp Cuối ngày
-              </div>
-              <div className="text-[11px] text-slate-500 mt-1">Lịch chạy: 17:30 hàng ngày</div>
-              <div className="text-[11px] text-blue-600 font-medium mt-0.5">Chờ kích hoạt ca tối</div>
-            </div>
-          </div>
-
-          {/* Nhật ký lọc 4 tầng */}
-          <div className="space-y-2">
-            <div className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
-              <span>Nhật ký lọc tệp tự động (Mới nhất)</span>
-              <span className="text-[11px] font-normal text-slate-400">4 Tầng Kiểm Soát</span>
-            </div>
-
-            <div className="max-h-48 overflow-y-auto space-y-1.5 divide-y divide-slate-100">
-              {rpaLogs.length > 0 ? (
-                rpaLogs.map((log) => {
-                  const isAccepted = log.status === 'ACCEPTED';
-                  return (
-                    <div key={log.id} className="pt-1.5 text-xs flex items-start gap-2">
-                      {isAccepted ? (
-                        <CheckCircle className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
-                      ) : (
-                        <XCircle className="h-4 w-4 text-rose-500 shrink-0 mt-0.5" />
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold text-slate-800 truncate">{log.fileName}</span>
-                          <span className="text-[10px] text-slate-400 font-mono">{log.timestamp}</span>
-                        </div>
-                        {isAccepted ? (
-                          <div className="text-[11px] text-emerald-700">
-                            Hợp lệ &rarr; Đã nạp vào hàng đợi OpenCV & PaddleOCR
-                          </div>
-                        ) : (
-                          <div className="text-[11px] text-rose-600 line-clamp-1">
-                            Từ chối: {log.reason}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="py-6 text-center text-xs text-slate-400">
-                  Chưa có nhật ký lọc tệp tự động.
-                </div>
-              )}
-            </div>
+            <p className="mt-1 text-xs leading-5 text-slate-600">
+              {workerStatus?.message || 'Chưa nhận được trạng thái từ API máy chủ.'}
+            </p>
+            <p className="mt-3 text-[11px] text-slate-500">
+              Email/IMAP và thư mục SMB chưa được kết nối. Dashboard chưa có API nhật ký cho từng tệp.
+            </p>
           </div>
         </div>
 
@@ -441,9 +391,9 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
             <div>
               <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <Building2 className="h-4 w-4 text-slate-700" />
-                Top Nhà Cung Cấp & Tỷ Lệ Sai Lệch
+                Nhà cung cấp trong kỳ
               </h2>
-              <p className="text-xs text-slate-500">Theo dõi chất lượng chứng từ và cảnh báo rủi ro thuế</p>
+              <p className="text-xs text-slate-500">Số hóa đơn và tỷ lệ sai lệch tính từ dữ liệu hiện có</p>
             </div>
           </div>
 
@@ -454,44 +404,32 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
                   <th className="pb-2 font-semibold">Nhà cung cấp</th>
                   <th className="pb-2 font-semibold">Mã số thuế</th>
                   <th className="pb-2 font-semibold text-center">Số HĐ nhận</th>
-                  <th className="pb-2 font-semibold text-right">Tỷ lệ sai lệch</th>
-                  <th className="pb-2 font-semibold text-center">Pháp lý</th>
+                  <th className="pb-2 font-semibold text-right">Tỷ lệ sai lệch*</th>
+                  <th className="pb-2 font-semibold text-center">Tra cứu MST</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
-                {suppliers.length > 0 ? (
-                  suppliers.slice(0, 5).map((sup) => (
+                {supplierMetrics.length > 0 ? (
+                  supplierMetrics.map(({ supplier: sup, invoiceCount, mismatchRate }) => (
                     <tr key={sup.code} className="hover:bg-slate-50 transition-colors">
                       <td className="py-2.5 font-medium text-slate-900 max-w-[160px] truncate">
                         {sup.name}
                       </td>
                       <td className="py-2.5 font-mono text-slate-500">{sup.taxCode}</td>
                       <td className="py-2.5 text-center font-bold text-slate-800">
-                        {sup.totalInvoicesReceived}
+                        {invoiceCount}
                       </td>
                       <td className="py-2.5 text-right font-bold">
                         <span
-                          className={`inline-block px-1.5 py-0.5 rounded ${
-                            sup.mismatchRate > 15
-                              ? 'bg-rose-100 text-rose-700'
-                              : sup.mismatchRate > 5
-                              ? 'bg-amber-100 text-amber-700'
-                              : 'bg-emerald-100 text-emerald-700'
-                          }`}
+                          className={mismatchRate == null ? 'inline-block px-1.5 py-0.5 rounded bg-slate-100 text-slate-500' : mismatchRate > 15 ? 'inline-block px-1.5 py-0.5 rounded bg-rose-100 text-rose-700' : mismatchRate > 5 ? 'inline-block px-1.5 py-0.5 rounded bg-amber-100 text-amber-700' : 'inline-block px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700'}
                         >
-                          {sup.mismatchRate}%
+                          {mismatchRate == null ? '—' : String(mismatchRate) + '%'}
                         </span>
                       </td>
                       <td className="py-2.5 text-center">
-                        {sup.legalStatus === 'ACTIVE' ? (
-                          <span className="inline-flex items-center text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
-                            Hoạt động
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center text-[10px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded">
-                            Rủi ro cao
-                          </span>
-                        )}
+                        <span className="inline-flex items-center text-[10px] font-semibold text-slate-500 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">
+                          Chưa tra cứu
+                        </span>
                       </td>
                     </tr>
                   ))
@@ -504,6 +442,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
                 )}
               </tbody>
             </table>
+            <p className="mt-2 text-[10px] text-slate-400">* Tính trên các hóa đơn đã đối soát; trạng thái MST chỉ hiển thị khi có dịch vụ tra cứu.</p>
           </div>
         </div>
       </div>

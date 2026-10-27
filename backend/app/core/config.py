@@ -20,9 +20,6 @@ class Settings(BaseSettings):
     inbox_scan_dir: str = ""
     load_demo_seed: bool = False
     demo_invoice_fixture_path: str = "../data/demo/public/HD_001.pdf"
-    # Frontend served at "/": "old" (Main, default until acceptance) or "react" (frontend/react-app build).
-    # /old, /mock and /new stay available either way so switching back is a config-only rollback.
-    primary_frontend: str = "react"
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

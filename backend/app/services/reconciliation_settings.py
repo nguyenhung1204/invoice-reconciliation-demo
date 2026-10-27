@@ -15,7 +15,18 @@ def defaults():
             "ocr_confidence_min": float(settings.ocr_min_confidence)}
 
 
-def get_reconciliation_settings():
+def get_reconciliation_settings(db=None):
+    if db is not None:
+        from app.models import ReconciliationSetting
+
+        row = db.get(ReconciliationSetting, 1)
+        if row is not None:
+            return {
+                "currency_tolerance": float(row.currency_tolerance),
+                "item_similarity_threshold": int(row.item_similarity_threshold),
+                "ocr_confidence_min": float(row.ocr_confidence_min),
+            }
+
     with _lock:
         try:
             saved = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))

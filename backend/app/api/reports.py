@@ -10,12 +10,13 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import current_user
-from app.models import AuditEvent, Invoice, User
+from app.models import AuditEvent, Invoice, ReconciliationSetting, User
 from app.core.config import settings
 from app.core.dependencies import require_roles
 from app.models import Supplier
 from app.services.scheduler import generate_daily_reconciliation_report, scan_inbox_folder
-from app.services.reconciliation_settings import get_reconciliation_settings, save_reconciliation_settings
+from app.services.scheduler import update_background_scan_interval
+from app.services.reconciliation_settings import get_reconciliation_settings as read_legacy_settings
 from pathlib import Path
 
 router = APIRouter(prefix="/reports", tags=["Module 6 · Reporting & Monitor"])
@@ -25,17 +26,52 @@ class ReconciliationSettingsIn(BaseModel):
     currency_tolerance: float = Field(ge=0)
     item_similarity_threshold: int = Field(ge=0, le=100)
     ocr_confidence_min: float = Field(ge=0, le=1)
+    rpa_scan_interval_minutes: int | None = Field(default=None, ge=1, le=60)
+    auto_alert_email: bool | None = None
+    auto_alert_telegram: bool | None = None
+
+
+def serialize_reconciliation_settings(row: ReconciliationSetting) -> dict:
+    return {"currency_tolerance": float(row.currency_tolerance),
+            "item_similarity_threshold": row.item_similarity_threshold,
+            "ocr_confidence_min": float(row.ocr_confidence_min),
+            "rpa_scan_interval_minutes": row.rpa_scan_interval_minutes,
+            "auto_alert_email": row.auto_alert_email,
+            "auto_alert_telegram": row.auto_alert_telegram}
 
 
 @router.get("/settings")
-def reconciliation_settings(_: User = Depends(current_user)):
-    return get_reconciliation_settings()
+def reconciliation_settings(db: Session = Depends(get_db), _: User = Depends(current_user)):
+    row = db.get(ReconciliationSetting, 1)
+    if row is None:
+        legacy = read_legacy_settings()
+        row = ReconciliationSetting(id=1, **legacy)
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    return serialize_reconciliation_settings(row)
 
 
 @router.put("/settings")
 def update_reconciliation_settings(body: ReconciliationSettingsIn,
-                                   _: User = Depends(require_roles("chief_accountant", "admin"))):
-    return save_reconciliation_settings(body.model_dump())
+                                   db: Session = Depends(get_db),
+                                   user: User = Depends(require_roles("chief_accountant", "admin"))):
+    values = body.model_dump(exclude_none=True)
+    row = db.get(ReconciliationSetting, 1)
+    if row is None:
+        row = ReconciliationSetting(id=1, **values)
+        db.add(row)
+    else:
+        for key, value in values.items():
+            setattr(row, key, value)
+    row.updated_by_user_id = getattr(user, "id", None)
+    db.add(AuditEvent(actor_user_id=getattr(user, "id", None), actor_email=user.email, action="settings.update",
+                      entity_type="reconciliation_settings", entity_id="1", detail="Cập nhật ngưỡng đối soát và OCR"))
+    db.commit()
+    db.refresh(row)
+    if "rpa_scan_interval_minutes" in values:
+        update_background_scan_interval(row.rpa_scan_interval_minutes)
+    return serialize_reconciliation_settings(row)
 
 
 @router.get("/reconciliation.csv")
@@ -78,11 +114,13 @@ def dashboard(db: Session = Depends(get_db), _: User = Depends(current_user)):
 
 
 @router.get("/worker")
-def worker_status(_: User = Depends(current_user)):
+def worker_status(db: Session = Depends(get_db), _: User = Depends(current_user)):
     inbox = Path(settings.inbox_scan_dir) if settings.inbox_scan_dir else None
     active = bool(inbox and inbox.is_dir())
+    saved_settings = db.get(ReconciliationSetting, 1)
+    interval = saved_settings.rpa_scan_interval_minutes if saved_settings else 5
     return {"active": active, "mode": "local_folder_poll" if active else "not_configured",
-            "message": "Đang theo dõi thư mục inbox mỗi phút" if active else "Chưa cấu hình thư mục inbox"}
+            "message": f"Đang theo dõi thư mục inbox mỗi {interval} phút" if active else "Chưa cấu hình thư mục inbox"}
 
 
 @router.post("/scan-now")
@@ -97,7 +135,10 @@ def scan_now(_: User = Depends(require_roles("admin"))):
 @router.get("/audit")
 def audit_log(limit: int = 100, db: Session = Depends(get_db), _: User = Depends(current_user)):
     rows = db.query(AuditEvent).order_by(AuditEvent.created_at.desc()).limit(min(limit, 500)).all()
-    return [{"id": x.id, "actor": x.actor_email, "action": x.action, "entity": f"{x.entity_type}:{x.entity_id}",
+    user_ids = {x.actor_user_id for x in rows if x.actor_user_id is not None}
+    roles = dict(db.query(User.id, User.role).filter(User.id.in_(user_ids)).all()) if user_ids else {}
+    return [{"id": x.id, "actor": x.actor_email, "actor_role": roles.get(x.actor_user_id),
+             "action": x.action, "entity": f"{x.entity_type}:{x.entity_id}",
              "detail": x.detail, "created_at": x.created_at.isoformat()} for x in rows]
 
 

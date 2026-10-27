@@ -9,7 +9,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from app.models import GoodsReceipt, Invoice, InvoiceFile, PurchaseOrder, Supplier
+from app.models import AccountingVoucher, Customer, Employee, GoodsReceipt, Invoice, InvoiceFile, Product, ProductCategory, PurchaseOrder, Supplier
 from app.services.invoice_lines import sync_invoice_items
 from app.services.procurement_lines import sync_goods_receipt_lines, sync_purchase_order_lines
 
@@ -83,6 +83,11 @@ def seed_public_demo(
         "goods_receipts_created": 0,
         "invoices_created": 0,
         "invoice_items_created": 0,
+        "product_categories_created": 0,
+        "products_created": 0,
+        "customers_created": 0,
+        "employees_created": 0,
+        "accounting_vouchers_created": 0,
     }
 
     try:
@@ -99,6 +104,7 @@ def seed_public_demo(
         supplier = db.query(Supplier).filter_by(tax_code=supplier_data["tax_code"]).first()
         if supplier is None:
             supplier = Supplier(
+                supplier_code="NCC-HD001-DEMO",
                 tax_code=supplier_data["tax_code"],
                 name=supplier_data["name"],
                 email=supplier_data.get("email", ""),
@@ -106,6 +112,61 @@ def seed_public_demo(
             db.add(supplier)
             counts["suppliers_created"] += 1
         db.flush()
+
+        demo_category = db.query(ProductCategory).filter_by(code="DEMO-CAT-01").first()
+        if demo_category is None:
+            demo_category = ProductCategory(
+                code="DEMO-CAT-01",
+                name="Danh mục DEMO - Thiết bị văn phòng",
+                description="Dữ liệu minh họa, có thể sửa hoặc xóa sau khi thử nghiệm.",
+            )
+            db.add(demo_category)
+            db.flush()
+            counts["product_categories_created"] += 1
+
+        if db.query(Product).filter_by(sku="DEMO-PRODUCT-01").first() is None:
+            db.add(Product(
+                sku="DEMO-PRODUCT-01",
+                product_name="Sản phẩm DEMO - Máy tính văn phòng",
+                unit="Chiếc",
+                category_id=demo_category.id,
+                cost_price=12000000,
+                selling_price=14500000,
+                stock_qty=5,
+            ))
+            counts["products_created"] += 1
+
+        if db.query(Customer).filter_by(code="DEMO-CUSTOMER-01").first() is None:
+            db.add(Customer(
+                code="DEMO-CUSTOMER-01",
+                name="Khách hàng DEMO",
+                phone="0900000000",
+                address="Địa chỉ minh họa",
+                email="demo-customer@example.test",
+            ))
+            counts["customers_created"] += 1
+
+        if db.query(Employee).filter_by(code="DEMO-EMPLOYEE-01").first() is None:
+            db.add(Employee(
+                code="DEMO-EMPLOYEE-01",
+                full_name="Nhân viên DEMO",
+                role="Kế toán viên",
+                phone="0910000000",
+                email="demo-employee@example.test",
+            ))
+            counts["employees_created"] += 1
+
+        if db.query(AccountingVoucher).filter_by(voucher_number="DEMO-PC-01").first() is None:
+            db.add(AccountingVoucher(
+                voucher_number="DEMO-PC-01",
+                voucher_type="CHI",
+                voucher_date=invoice_data["invoice_date"],
+                related_party_name=supplier_data["name"],
+                content="Phiếu chi DEMO - thanh toán hóa đơn HD_001",
+                amount=invoice_data["total_amount"],
+                is_auto_generated=False,
+            ))
+            counts["accounting_vouchers_created"] += 1
 
         purchase_order = db.query(PurchaseOrder).filter_by(
             po_number=purchase_order_data["po_number"]

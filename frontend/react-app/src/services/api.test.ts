@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { api, ApiError } from './api.ts';
+import { api, ApiError, mockActions, store } from './api.ts';
 
 const tokenStorage = new Map<string, string>();
 Object.defineProperty(globalThis, 'sessionStorage', {
@@ -109,6 +109,66 @@ test('logout calls the backend and clears the local token even when the request 
   assert.equal(tokenStorage.has('autoinvoice_access_token'), false);
 });
 
+test('restoreSession never silently logs in with the built-in demo administrator', async () => {
+  tokenStorage.delete('autoinvoice_access_token');
+  globalThis.fetch = async () => { throw new Error('No request is expected without a saved session.'); };
+  assert.equal(await api.restoreSession(), null);
+
+  tokenStorage.set('autoinvoice_access_token', 'expired-token');
+  let paths: string[] = [];
+  globalThis.fetch = async (input) => {
+    paths.push(String(input));
+    return new Response(JSON.stringify({ detail: 'Phiên đăng nhập không hợp lệ' }), {
+      status: 401, headers: { 'content-type': 'application/json' },
+    });
+  };
+  assert.equal(await api.restoreSession(), null);
+  assert.deepEqual(paths, ['/api/auth/me']);
+  assert.equal(tokenStorage.has('autoinvoice_access_token'), false);
+});
+
+test('settings are not reported as saved or changed when MySQL update fails', async () => {
+  const before = store.getSettings();
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    access_token: 'settings-token', token_type: 'bearer',
+    user: { email: 'chief@example.test', role: 'chief_accountant' },
+  }), { status: 200, headers: { 'content-type': 'application/json' } });
+  await api.login('chief@example.test', 'secret');
+  globalThis.fetch = async () => new Response(JSON.stringify({ detail: 'database unavailable' }), {
+    status: 503, headers: { 'content-type': 'application/json' },
+  });
+
+  await assert.rejects(
+    mockActions.updateRuleSettings({ ...before, toleranceThresholdVnd: before.toleranceThresholdVnd + 1 }),
+    /database unavailable/i,
+  );
+  assert.deepEqual(store.getSettings(), before);
+
+  let submitted: Record<string, unknown> | null = null;
+  globalThis.fetch = async (_input, init) => {
+    submitted = JSON.parse(String(init?.body));
+    return new Response(JSON.stringify(submitted), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  const next = {
+    ...before,
+    toleranceThresholdVnd: before.toleranceThresholdVnd + 2,
+    rpaScanIntervalMinutes: 15,
+    autoAlertEmail: false,
+    autoAlertTelegram: false,
+  };
+  const saved = await mockActions.updateRuleSettings(next);
+  assert.deepEqual(submitted, {
+    currency_tolerance: next.toleranceThresholdVnd,
+    item_similarity_threshold: next.fuzzyMatchingThresholdPct,
+    ocr_confidence_min: next.ocrConfidenceThresholdPct / 100,
+    rpa_scan_interval_minutes: 15,
+    auto_alert_email: false,
+    auto_alert_telegram: false,
+  });
+  assert.equal(saved.autoAlertEmail, false);
+  await mockActions.updateRuleSettings(before);
+});
+
 test('read APIs send the bearer token and validate dashboard, worker and invoice contracts', async () => {
   globalThis.fetch = async () => new Response(JSON.stringify({
     access_token: 'read-api-token', token_type: 'bearer',
@@ -205,7 +265,8 @@ test('invoice review and reconciliation operations use the backend workflow and 
   };
 
   const review = await api.saveInvoiceReview(7, {
-    seller_tax_code: '123', buyer_tax_code: '456', invoice_number: 'A-01', invoice_date: '2026-01-02',
+    seller_tax_code: '123', seller_name: 'Nhà cung cấp thử nghiệm', invoice_series: '1C26TAA',
+    buyer_tax_code: '456', invoice_number: 'A-01', invoice_date: '2026-01-02',
     total_amount: 100, items: [{ name: 'Hàng mẫu' }], po_number: 'PO-1', review_note: 'Kiểm tra',
   });
   const reconciliation = await api.reconcileInvoice(7);
@@ -217,7 +278,8 @@ test('invoice review and reconciliation operations use the backend workflow and 
     ['/api/invoices/7/review', 'PATCH'], ['/api/invoices/7/reconcile', 'POST'], ['/api/invoices/7/approve', 'POST'],
   ]);
   assert.deepEqual(JSON.parse(String(calls[0].body)), {
-    seller_tax_code: '123', buyer_tax_code: '456', invoice_number: 'A-01', invoice_date: '2026-01-02',
+    seller_tax_code: '123', seller_name: 'Nhà cung cấp thử nghiệm', invoice_series: '1C26TAA',
+    buyer_tax_code: '456', invoice_number: 'A-01', invoice_date: '2026-01-02',
     total_amount: 100, items: [{ name: 'Hàng mẫu' }], po_number: 'PO-1', review_note: 'Kiểm tra',
   });
 });
@@ -286,19 +348,19 @@ test('supplier, purchase-order and goods-receipt CRUD clients use the real ledge
     calls.push({ url, method, body: init?.body });
     if (method === 'DELETE') return new Response(JSON.stringify({ message: 'deleted' }), { status: 200, headers: { 'content-type': 'application/json' } });
     if (method === 'GET') return new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } });
-    if (url.includes('suppliers')) return new Response(JSON.stringify({ id: 2, tax_code: '123', name: 'Supplier', email: '' }), { status: 201, headers: { 'content-type': 'application/json' } });
-    if (url.includes('purchase-orders')) return new Response(JSON.stringify({ id: 3, po_number: 'PO-3', supplier_tax_code: '123', total_amount: 50, status: 'open', lines: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
-    return new Response(JSON.stringify({ id: 4, receipt_number: 'GR-4', po_number: 'PO-3', received_at: '2026-10-26T00:00:00', lines: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (url.includes('suppliers')) return new Response(JSON.stringify({ id: 2, supplier_code: null, tax_code: '123', name: 'Supplier', address: '', phone: '', email: '' }), { status: 201, headers: { 'content-type': 'application/json' } });
+    if (url.includes('purchase-orders')) return new Response(JSON.stringify({ id: 3, po_number: 'PO-3', supplier_tax_code: '123', supplier_name: 'Supplier', total_amount: 50, status: 'open', order_date: '2026-10-27', expected_delivery_date: '2026-11-03', created_by: 'admin@example.test', employee_code: '', lines: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    return new Response(JSON.stringify({ id: 4, receipt_number: 'GR-4', po_number: 'PO-3', supplier_name: 'Supplier', received_at: '2026-10-26T00:00:00', received_by: 'Admin', warehouse_location: 'Kho A', lines: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
   };
 
   assert.equal((await api.listSuppliers()).length, 0);
   assert.equal((await api.addSupplier({ tax_code: '123', name: 'Supplier', email: '' })).id, 2);
   assert.equal((await api.listPurchaseOrders()).length, 0);
-  assert.equal((await api.createPurchaseOrder({ po_number: 'PO-3', supplier_tax_code: '123', total_amount: 50, lines: [] })).id, 3);
+  assert.equal((await api.createPurchaseOrder({ po_number: 'PO-3', supplier_tax_code: '123', total_amount: 50, order_date: '2026-10-27', expected_delivery_date: '2026-11-03', employee_code: '', lines: [] })).id, 3);
   assert.equal((await api.updatePurchaseOrder(3, { total_amount: 50 })).po_number, 'PO-3');
   await api.deletePurchaseOrder(3);
   assert.equal((await api.listGoodsReceipts()).length, 0);
-  assert.equal((await api.createGoodsReceipt({ receipt_number: 'GR-4', po_number: 'PO-3', lines: [] })).id, 4);
+  assert.equal((await api.createGoodsReceipt({ receipt_number: 'GR-4', po_number: 'PO-3', received_by: 'Admin', warehouse_location: 'Kho A', lines: [] })).id, 4);
   assert.equal((await api.updateGoodsReceipt(4, { receipt_number: 'GR-4' })).id, 4);
   await api.deleteGoodsReceipt(4);
   assert.deepEqual(calls.map(({ url, method }) => [url, method]), [
@@ -307,6 +369,94 @@ test('supplier, purchase-order and goods-receipt CRUD clients use the real ledge
     ['/api/ledger/purchase-orders/3', 'PATCH'], ['/api/ledger/purchase-orders/3', 'DELETE'],
     ['/api/ledger/goods-receipts', 'GET'], ['/api/ledger/goods-receipts', 'POST'],
     ['/api/ledger/goods-receipts/4', 'PATCH'], ['/api/ledger/goods-receipts/4', 'DELETE'],
+  ]);
+});
+
+test('master-data CRUD clients use the MySQL-backed API routes for every visible table', async () => {
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    access_token: 'master-data-token', token_type: 'bearer',
+    user: { email: 'admin@example.test', role: 'admin' },
+  }), { status: 200, headers: { 'content-type': 'application/json' } });
+  await api.login('admin@example.test', 'secret');
+
+  const categories = [{ id: 1, code: 'DEMO-CAT-01', name: 'Demo category', description: 'Demo' }];
+  const products = [{ id: 2, code: 'DEMO-PRODUCT-01', name: 'Demo product', category_code: 'DEMO-CAT-01', unit: 'Cái', cost_price: 10, selling_price: 20, stock_qty: 3 }];
+  const customers = [{ id: 3, code: 'DEMO-CUSTOMER-01', name: 'Demo customer', phone: '', address: '', email: '' }];
+  const employees = [{ id: 4, code: 'DEMO-EMPLOYEE-01', full_name: 'Demo employee', role: 'Kế toán viên', phone: '', email: '' }];
+  const calls: Array<[string, string]> = [];
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    const method = String(init?.method ?? 'GET');
+    assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer master-data-token');
+    calls.push([url, method]);
+    const records = url.includes('product-categories') ? categories
+      : url.includes('/products') ? products
+        : url.includes('/customers') ? customers : employees;
+    const body = method === 'DELETE' ? { message: 'deleted' }
+      : method === 'GET' ? records : records[0];
+    return new Response(JSON.stringify(body), {
+      status: method === 'POST' ? 201 : 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+
+  assert.equal((await api.listProductCategories())[0].code, 'DEMO-CAT-01');
+  await api.createProductCategory({ code: 'DEMO-CAT-02', name: 'New category', description: '' });
+  await api.updateProductCategory('DEMO-CAT-01', { name: 'Changed category' });
+  await api.deleteProductCategory('DEMO-CAT-01');
+
+  assert.equal((await api.listProducts())[0].code, 'DEMO-PRODUCT-01');
+  await api.createProduct({ code: 'DEMO-PRODUCT-02', name: 'New product', category_code: 'DEMO-CAT-01', unit: 'Cái', cost_price: 10, selling_price: 20, stock_qty: 0 });
+  await api.updateProduct('DEMO-PRODUCT-01', { stock_qty: 4 });
+  await api.deleteProduct('DEMO-PRODUCT-01');
+
+  assert.equal((await api.listCustomers())[0].code, 'DEMO-CUSTOMER-01');
+  await api.createCustomer({ code: 'DEMO-CUSTOMER-02', name: 'New customer', phone: '', address: '', email: '' });
+  await api.updateCustomer('DEMO-CUSTOMER-01', { name: 'Changed customer' });
+  await api.deleteCustomer('DEMO-CUSTOMER-01');
+
+  assert.equal((await api.listEmployees())[0].code, 'DEMO-EMPLOYEE-01');
+  await api.createEmployee({ code: 'DEMO-EMPLOYEE-02', full_name: 'New employee', role: 'Kế toán viên', phone: '', email: '' });
+  await api.updateEmployee('DEMO-EMPLOYEE-01', { full_name: 'Changed employee' });
+  await api.deleteEmployee('DEMO-EMPLOYEE-01');
+
+  assert.deepEqual(calls, [
+    ['/api/master-data/product-categories', 'GET'], ['/api/master-data/product-categories', 'POST'],
+    ['/api/master-data/product-categories/DEMO-CAT-01', 'PATCH'], ['/api/master-data/product-categories/DEMO-CAT-01', 'DELETE'],
+    ['/api/master-data/products', 'GET'], ['/api/master-data/products', 'POST'],
+    ['/api/master-data/products/DEMO-PRODUCT-01', 'PATCH'], ['/api/master-data/products/DEMO-PRODUCT-01', 'DELETE'],
+    ['/api/master-data/customers', 'GET'], ['/api/master-data/customers', 'POST'],
+    ['/api/master-data/customers/DEMO-CUSTOMER-01', 'PATCH'], ['/api/master-data/customers/DEMO-CUSTOMER-01', 'DELETE'],
+    ['/api/master-data/employees', 'GET'], ['/api/master-data/employees', 'POST'],
+    ['/api/master-data/employees/DEMO-EMPLOYEE-01', 'PATCH'], ['/api/master-data/employees/DEMO-EMPLOYEE-01', 'DELETE'],
+  ]);
+});
+
+test('accounting voucher CRUD follows the database-backed accounting API', async () => {
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    access_token: 'accounting-token', token_type: 'bearer',
+    user: { email: 'admin@example.test', role: 'admin' },
+  }), { status: 200, headers: { 'content-type': 'application/json' } });
+  await api.login('admin@example.test', 'secret');
+  const calls: Array<[string, string]> = [];
+  let saved = { id: 4, voucher_number: 'PC-000004', voucher_type: 'CHI' as const, voucher_date: '2026-10-27', related_party_name: 'Demo', related_invoice_id: null, content: 'Thanh toán', amount: 1200000, is_auto_generated: false };
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    const method = String(init?.method || 'GET');
+    calls.push([url, method]);
+    if (method === 'GET') return new Response(JSON.stringify([saved]), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (method === 'POST') return new Response(JSON.stringify(saved), { status: 201, headers: { 'content-type': 'application/json' } });
+    if (method === 'PATCH') return new Response(JSON.stringify({ ...saved, amount: 1500000 }), { status: 200, headers: { 'content-type': 'application/json' } });
+    return new Response(JSON.stringify({ message: 'deleted' }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  assert.equal((await api.listAccountingVouchers())[0].voucher_number, 'PC-000004');
+  const body = { voucher_type: 'CHI' as const, voucher_date: '2026-10-27', related_party_name: 'Demo', related_invoice_id: null, content: 'Thanh toán', amount: 1200000 };
+  assert.equal((await api.createAccountingVoucher(body)).id, 4);
+  assert.equal((await api.updateAccountingVoucher(4, { amount: 1500000 })).amount, 1500000);
+  await api.deleteAccountingVoucher(4);
+  assert.deepEqual(calls, [
+    ['/api/accounting/vouchers', 'GET'], ['/api/accounting/vouchers', 'POST'],
+    ['/api/accounting/vouchers/4', 'PATCH'], ['/api/accounting/vouchers/4', 'DELETE'],
   ]);
 });
 
@@ -324,20 +474,7 @@ test('binary downloads reject successful HTML proxy responses', async () => {
   await assert.rejects(api.downloadReport('csv'), /không phải file nhị phân/i);
 });
 
-test('clearAllData posts to /ledger/clear-all and returns confirmation message', async () => {
-  let calledUrl = '';
-  let calledMethod = '';
-  globalThis.fetch = async (input, init) => {
-    calledUrl = String(input);
-    calledMethod = init?.method ?? 'GET';
-    return new Response(JSON.stringify({ message: 'Đã xóa toàn bộ dữ liệu đơn hàng và hóa đơn.' }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    });
-  };
-  const result = await api.clearAllData();
-  assert.equal(calledUrl, '/api/ledger/clear-all');
-  assert.equal(calledMethod, 'POST');
-  assert.equal(result.message, 'Đã xóa toàn bộ dữ liệu đơn hàng và hóa đơn.');
+test('frontend client does not expose the destructive whole-dataset clear operation', () => {
+  assert.equal('clearAllData' in api, false);
 });
 

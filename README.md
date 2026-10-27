@@ -2,10 +2,9 @@
 
 ## Current application routes
 
-- `/` serves the previous Main frontend by default. Set `PRIMARY_FRONTEND=react` (environment or `backend/.env`) to serve the React application in `frontend/react-app/` at `/` once acceptance is complete. Setting it back to `old` (or removing it) is the rollback; if the React build is missing, `/` falls back to Main.
-- `/old` keeps the previous Main frontend for reference and rollback.
-- `/mock` keeps the Legacy mock bundle during acceptance.
-- `/new` always serves the React build for acceptance testing.
+- `/` serves the React application in `frontend/react-app/`.
+- `/mock` and `/new` are compatibility aliases to that same React application; they do not serve a separate mock dataset.
+- `/old` returns 404. Unknown `/api/...` paths return a JSON 404 instead of the frontend HTML.
 
 Docker builds the official React source and places its static assets into the FastAPI image. For local FastAPI runs, build the React app once before opening `/`:
 
@@ -18,7 +17,7 @@ cd ../..
 
 The new UI stores its short-lived access token in tab-scoped `sessionStorage` and uses the same-origin `/api` prefix by default. Set `VITE_API_BASE_URL` at build time only when the API is hosted at a different base path.
 
-Demo for Vietnamese VAT invoice intake, accountant review, PO/GR reconciliation, and reporting. Docker Compose starts one FastAPI app and one MySQL database; the app seeds one ready-to-review invoice scenario on a fresh database.
+Demo for Vietnamese VAT invoice intake, accountant review, PO/GR reconciliation, and reporting. Docker Compose starts one FastAPI app and one MySQL database. With `LOAD_DEMO_SEED=1` (the Compose default), startup adds the ready-to-review invoice scenario and missing `DEMO-...` master-data examples without replacing existing records.
 
 ## Chạy demo trên Windows
 
@@ -27,7 +26,7 @@ Demo for Vietnamese VAT invoice intake, accountant review, PO/GR reconciliation,
 3. Nhấp đúp `start-demo.bat`. Lần đầu Docker build image và khởi tạo MySQL, có thể mất vài phút.
 4. Mở [http://localhost:8000](http://localhost:8000). Đăng nhập bằng `admin@gmail.com` / `admin`, `ketoan@gmail.com` / `admin`, hoặc `ketoantruong@gmail.com` / `admin`.
 
-Demo nạp đúng một hóa đơn `HD_001.pdf`, thông tin hóa đơn lấy từ PDF, cùng nhà cung cấp và hai dòng hàng tương ứng. PO `PO-DEMO-HD001` và GR `GR-DEMO-HD001` được dựng để minh họa phần trước khi nhận hóa đơn; chúng **không phải chứng từ PO/GR gốc**. Hóa đơn ở trạng thái cần kế toán rà soát. File PDF được đưa vào repo theo yêu cầu chia sẻ demo của nhóm. PO, GR, dòng hóa đơn, hồ sơ OCR, bản rà soát, kết quả đối soát và quyết định duyệt dùng các bảng quan hệ trong cùng database `invoice_reconciliation`.
+Demo có hóa đơn `HD_001.pdf`, nhà cung cấp, hai dòng hàng, PO `PO-DEMO-HD001` và GR `GR-DEMO-HD001`. PO và GR được dựng để minh họa quy trình; chúng **không phải chứng từ PO/GR gốc**. Hóa đơn ở trạng thái cần kế toán rà soát. Seed còn thêm ví dụ DEMO cho loại sản phẩm, sản phẩm, khách hàng, nhân viên và phiếu thu chi nếu mã mẫu chưa có. Seed có thể chạy lại: chỉ bổ sung mục còn thiếu, không ghi đè hoặc xóa dữ liệu. Các bản ghi, cấu hình và audit nằm trong MySQL; file PDF nằm trong Docker volume `invoice_uploads` và MySQL lưu đường dẫn/metadata.
 
 Nếu không dùng file `.bat`, mở PowerShell ở thư mục repo và chạy:
 
@@ -36,7 +35,7 @@ Copy-Item .env.docker.example .env
 docker compose up --build --wait -d
 ```
 
-Mở `/docs` để xem API. Dùng `docker compose ps` để xem trạng thái; dừng app bằng `docker compose down`. Dữ liệu trong các Docker volume được giữ lại. Khi app khởi động, migration có phiên bản cập nhật schema ngay trong database đang cấu hình, giữ nguyên ID và dữ liệu hóa đơn hiện có; HD_001 vẫn là dữ liệu seed duy nhất của demo mới. Không chạy `docker compose down -v` nếu muốn giữ dữ liệu.
+Mở `/docs` để xem API. Dùng `docker compose ps` để xem trạng thái; dừng app bằng `docker compose down`. Các named volume được giữ lại. Khi app khởi động, migration phiên bản cập nhật schema theo hướng tiến, giữ ID và dữ liệu hiện có. Seed demo chỉ thêm các mã mẫu còn thiếu; dữ liệu demo cũ vẫn được giữ nguyên.
 
 Các tài khoản/mật khẩu mẫu chỉ dùng thử cục bộ. Trước khi chia sẻ app qua mạng, hãy sửa mật khẩu và `SECRET_KEY` trong `.env`. OCR dùng PaddleOCR CPU; lần chạy OCR đầu có thể cần tải model. Trọng số fine-tune không nằm trong repo.
 
@@ -61,7 +60,7 @@ docker compose ps
 
 Open `http://localhost:8000` (API docs: `/docs`). Demo accounts are `admin@gmail.com`, `ketoan@gmail.com`, and `ketoantruong@gmail.com`; each starts with password `admin`. Change these credentials before exposing the app to a network.
 
-Stop with `docker compose down`; named volumes are preserved. OCR CPU support is enabled by default. If the UI says `No module named 'paddleocr'`, set `INSTALL_OCR=1` in `.env` and rebuild with `docker compose up --build --wait -d` (or rerun `start-demo.bat`). If an older run still shows invoices such as `HD_031.pdf` or says the original PDF is missing, its database volume contains the previous demo data. To reload the single `HD_001` demo, make sure `.env` has `INSTALL_OCR=1`, run `docker compose down -v`, then run `start-demo.bat`. This reset deletes the local demo database, uploaded files, and cached OCR models, so use it only when those old demo records can be discarded.
+Stop with `docker compose down`; named volumes are preserved. OCR CPU support is enabled by default. If the UI says `No module named 'paddleocr'`, set `INSTALL_OCR=1` in `.env` and rebuild with `docker compose up --build --wait -d` (or rerun `start-demo.bat`). Existing invoices and uploaded files are preserved across rebuilds; the demo seed does not reset an older database.
 
 ## Run locally (SQLite)
 

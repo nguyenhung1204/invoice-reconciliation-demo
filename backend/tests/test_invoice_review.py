@@ -1,15 +1,22 @@
+import asyncio
+from io import BytesIO
+
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 import pytest
+from starlette.datastructures import Headers, UploadFile
 
+from app.api import invoices as invoice_api
 from app.api.invoices import ReviewIn, approve_invoice, reconcile_invoice, review_invoice
 from app.core.database import Base
 from app.models import (
-    GoodsReceipt, Invoice, InvoiceApproval, InvoiceItem, InvoiceReview,
+    GoodsReceipt, Invoice, InvoiceApproval, InvoiceItem, InvoiceOCRRun, InvoiceReview,
     PurchaseOrder, ReconciliationLineAllocation, ReconciliationRun,
-    ReconciliationRunGoodsReceipt, Supplier, User,
+    ReconciliationRunGoodsReceipt, ReconciliationSetting, Supplier, User,
 )
+from app.api.invoices import _allocate_reconciliation_lines
+from app.services import reconciliation_settings
 from app.services.invoice_lines import sync_invoice_items
 from app.services.invoice_lifecycle import delete_invoice_dependents
 from app.services.procurement_lines import sync_goods_receipt_lines, sync_purchase_order_lines
@@ -35,6 +42,8 @@ def test_accountant_review_saves_normalized_invoice_lines(tmp_path):
                 invoice.id,
                 ReviewIn(
                     seller_tax_code="0100000000",
+                    seller_name="Nhà cung cấp thử nghiệm",
+                    invoice_series="1C26TAA",
                     buyer_tax_code="0200000000",
                     invoice_number="12345",
                     invoice_date="2026-01-20",
@@ -51,6 +60,8 @@ def test_accountant_review_saves_normalized_invoice_lines(tmp_path):
             )
 
             assert result["status"] == "reviewed"
+            assert result["seller_name"] == "Nhà cung cấp thử nghiệm"
+            assert result["invoice_series"] == "1C26TAA"
             assert len(result["items"]) == 2
             assert result["items"][0]["name"] == "Hàng mẫu"
             assert db.query(func.count(InvoiceItem.id)).scalar() == 2
@@ -149,6 +160,99 @@ def test_reconciliation_and_approval_are_saved_against_review_snapshot(tmp_path)
             assert db.query(ReconciliationRun).count() == 0
             assert db.query(ReconciliationLineAllocation).count() == 0
             assert db.query(InvoiceApproval).count() == 0
+    finally:
+        Base.metadata.drop_all(engine)
+        engine.dispose()
+
+
+def test_line_allocation_uses_database_similarity_threshold(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'line-threshold.db'}")
+    Base.metadata.create_all(engine)
+    settings_file = tmp_path / "legacy-settings.json"
+    settings_file.write_text(
+        '{"currency_tolerance":1,"item_similarity_threshold":90,"ocr_confidence_min":0.8}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(reconciliation_settings, "SETTINGS_PATH", settings_file)
+    try:
+        with Session(engine, expire_on_commit=False) as db:
+            supplier = Supplier(tax_code="SUP-THRESHOLD", name="Threshold supplier")
+            db.add(supplier)
+            db.flush()
+            po = PurchaseOrder(
+                po_number="PO-THRESHOLD", supplier_id=supplier.id,
+                supplier_tax_code=supplier.tax_code, total_amount=100,
+            )
+            invoice = Invoice(
+                original_name="threshold.pdf", stored_path="threshold.pdf",
+                status="needs_review", total_amount=100, po_id=None,
+            )
+            db.add_all([po, invoice])
+            db.flush()
+            sync_purchase_order_lines(po, [{
+                "name": "Widget", "unit": "Cái", "quantity": 1,
+                "unit_price": 100, "amount": 100,
+            }])
+            sync_invoice_items(invoice, [{
+                "name": "Widgets", "unit": "Cái", "quantity": 1,
+                "unit_price": 100, "amount": 100,
+            }], source="manual_review")
+            run = ReconciliationRun(invoice_id=invoice.id, status="completed")
+            db.add_all([
+                run,
+                ReconciliationSetting(
+                    id=1, currency_tolerance=1,
+                    item_similarity_threshold=100, ocr_confidence_min=0.8,
+                ),
+            ])
+            db.flush()
+
+            _allocate_reconciliation_lines(db, run, invoice, po, [], [])
+            db.flush()
+
+            allocation = db.query(ReconciliationLineAllocation).one()
+            assert allocation.po_item_id is None
+    finally:
+        Base.metadata.drop_all(engine)
+        engine.dispose()
+
+
+def test_upload_and_retry_ocr_use_database_confidence_threshold(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'ocr-threshold.db'}")
+    Base.metadata.create_all(engine)
+    settings_file = tmp_path / "legacy-ocr-settings.json"
+    settings_file.write_text(
+        '{"currency_tolerance":1,"item_similarity_threshold":90,"ocr_confidence_min":0.8}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(reconciliation_settings, "SETTINGS_PATH", settings_file)
+    monkeypatch.setattr(invoice_api.settings, "upload_dir", str(tmp_path / "uploads"))
+    monkeypatch.setattr(invoice_api, "recognize_file", lambda _path: {
+        "text": "invoice text", "confidence": 0.85, "blocks": [],
+    })
+    try:
+        with Session(engine, expire_on_commit=False) as db:
+            user = User(email="ocr@example.test", password_hash="x", role="admin")
+            db.add_all([
+                user,
+                ReconciliationSetting(
+                    id=1, currency_tolerance=1,
+                    item_similarity_threshold=90, ocr_confidence_min=0.9,
+                ),
+            ])
+            db.commit()
+
+            upload = UploadFile(
+                filename="threshold.pdf", file=BytesIO(b"%PDF-test"),
+                headers=Headers({"content-type": "application/pdf"}),
+            )
+            created = asyncio.run(invoice_api.upload_invoice(upload, db, user))
+            assert created["status"] == "needs_review"
+            assert db.query(InvoiceOCRRun).one().config_json["minimum_confidence"] == 0.9
+
+            retried = asyncio.run(invoice_api.retry_ocr(created["id"], db, user))
+            assert retried["status"] == "needs_review"
+            assert [run.config_json["minimum_confidence"] for run in db.query(InvoiceOCRRun).all()] == [0.9, 0.9]
     finally:
         Base.metadata.drop_all(engine)
         engine.dispose()

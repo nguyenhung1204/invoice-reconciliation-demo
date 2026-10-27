@@ -16,7 +16,8 @@ import { ReportsAndSettingsModule } from './components/reports/ReportsAndSetting
 import { AccountingLedgerModule } from './components/accounting/AccountingLedgerModule.tsx';
 import { api, store } from './services/api.ts';
 import type { AuthenticatedUser } from './services/api.ts';
-import { InvoiceRecord, GoodsReceipt, PurchaseOrder, SupplierMaster, RuleSettings, UserProfile, RpaScanLog } from './types/index.ts';
+import { InvoiceRecord, GoodsReceipt, PurchaseOrder, SupplierMaster, RuleSettings, UserProfile } from './types/index.ts';
+import type { WorkerStatusDTO } from './services/api.ts';
 
 function toUserProfile(user: AuthenticatedUser): UserProfile {
   const roleDetails = {
@@ -49,7 +50,7 @@ export default function App() {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>(store.getPurchaseOrders());
   const [goodsReceipts, setGoodsReceipts] = useState<GoodsReceipt[]>(store.getGoodsReceipts());
   const [suppliers, setSuppliers] = useState<SupplierMaster[]>(store.getSuppliers());
-  const [rpaLogs, setRpaLogs] = useState<RpaScanLog[]>(store.getRpaLogs());
+  const [workerStatus, setWorkerStatus] = useState<WorkerStatusDTO | null>(store.getWorkerStatus());
   const [settings, setSettings] = useState<RuleSettings>(store.getSettings());
   useEffect(() => {
     // Đăng ký lắng nghe thay đổi từ Store
@@ -58,7 +59,7 @@ export default function App() {
       setPurchaseOrders(store.getPurchaseOrders());
       setGoodsReceipts(store.getGoodsReceipts());
       setSuppliers(store.getSuppliers());
-      setRpaLogs(store.getRpaLogs());
+      setWorkerStatus(store.getWorkerStatus());
       setSettings(store.getSettings());
     });
     return () => unsubscribe();
@@ -78,24 +79,21 @@ export default function App() {
       try {
         const user = await api.restoreSession();
         if (!active) return;
-        if (user) {
-          const profile = toUserProfile(user);
-          store.setAuthenticatedUser(profile);
-          setCurrentUser(profile);
-          setAuthState('signed_in');
-          void store.syncWithBackend();
-        } else {
-          const profile = store.getCurrentUser();
-          setCurrentUser(profile);
-          setAuthState('signed_in');
-          void store.syncWithBackend();
+        if (!user) {
+          setCurrentUser(null);
+          setAuthState('signed_out');
+          return;
         }
-      } catch {
+        const profile = toUserProfile(user);
+        store.setAuthenticatedUser(profile);
+        await store.syncWithBackend();
         if (!active) return;
-        const profile = store.getCurrentUser();
         setCurrentUser(profile);
         setAuthState('signed_in');
-        void store.syncWithBackend();
+      } catch (error) {
+        if (!active) return;
+        setAuthError(error instanceof Error ? error.message : 'Không thể tải dữ liệu từ máy chủ.');
+        setAuthState('error');
       }
     };
     void restore();
@@ -115,10 +113,15 @@ export default function App() {
     const user = await api.login(email, password);
     const profile = toUserProfile(user);
     store.setAuthenticatedUser(profile);
+    try {
+      await store.syncWithBackend();
+    } catch (error) {
+      await api.logout();
+      throw error;
+    }
     setCurrentUser(profile);
     setAuthError('');
     setAuthState('signed_in');
-    void store.syncWithBackend();
   };
 
   const handleLogout = async () => {
@@ -188,11 +191,11 @@ export default function App() {
         <Header
           currentUser={currentUser}
           invoices={invoices}
+          showScanAction={currentTab !== 'queue'}
           onSelectInvoice={(code) => setSelectedInvoiceCode(code)}
           onNavigateToMatching={() => setCurrentTab('matching')}
           onToggleMobileMenu={() => setMobileMenuOpen(!mobileMenuOpen)}
           onLogout={handleLogout}
-          onRoleChange={(role) => store.setCurrentUser(role)}
         />
 
         {/* Màn hình phân hệ đang chọn */}
@@ -202,7 +205,7 @@ export default function App() {
               <DashboardModule
                 invoices={invoices}
                 suppliers={suppliers}
-                rpaLogs={rpaLogs}
+                workerStatus={workerStatus}
                 onSelectInvoice={(code) => setSelectedInvoiceCode(code)}
                 onNavigateToMatching={() => setCurrentTab('matching')}
                 onNavigateToQueue={() => setCurrentTab('queue')}
@@ -212,6 +215,7 @@ export default function App() {
             {currentTab === 'queue' && (
               <QueueModule
                 invoices={invoices}
+                canScan={currentUser.role === 'ADMIN'}
                 onSelectInvoice={(code) => setSelectedInvoiceCode(code)}
                 onNavigateToMatching={() => setCurrentTab('matching')}
               />

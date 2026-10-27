@@ -8,7 +8,6 @@ import {
   CheckCircle2,
   Sliders,
   BellRing,
-  Clock,
   History,
   FileCheck,
   Building,
@@ -20,6 +19,7 @@ import { InvoiceRecord, RuleSettings, UserProfile } from '../../types/index.ts';
 import { formatCurrencyVND } from '../../utils/matchingEngine.ts';
 import { api, mockActions, store } from '../../services/api.ts';
 import type { AuditEventDTO } from '../../services/api.ts';
+import { buildInvoiceXmlExport } from '../../utils/reportExport.ts';
 
 interface ReportsAndSettingsModuleProps {
   invoices: InvoiceRecord[];
@@ -34,8 +34,9 @@ export const ReportsAndSettingsModule: React.FC<ReportsAndSettingsModuleProps> =
 }) => {
   const [activeTab, setActiveTab] = useState<'REPORTS' | 'RULES' | 'LOGS'>('REPORTS');
   const [localSettings, setLocalSettings] = useState<RuleSettings>({ ...settings });
-  const [saveToast, setSaveToast] = useState<string | null>(null);
-  const [showMisaPreview, setShowMisaPreview] = useState(false);
+  const [saveToast, setSaveToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [showXmlPreview, setShowXmlPreview] = useState(false);
   const [auditEvents, setAuditEvents] = useState<AuditEventDTO[]>(() => store.getAuditEvents());
 
   React.useEffect(() => {
@@ -44,19 +45,33 @@ export const ReportsAndSettingsModule: React.FC<ReportsAndSettingsModuleProps> =
     });
   }, []);
 
-  // Danh sách các hóa đơn đã khớp / phê duyệt sẵn sàng xuất MISA/ERP
-  const approvedInvoices = invoices.filter(
-    (inv) => inv.status === 'MATCHED'
-  );
+  React.useEffect(() => {
+    setLocalSettings({ ...settings });
+  }, [settings]);
+
+  // Export a read-only generic XML sample for approved invoices.
+  const approvedInvoices = invoices.filter((inv) => inv.status === 'APPROVED');
 
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    await mockActions.updateRuleSettings(localSettings);
-    setSaveToast('Đã lưu cấu hình quy tắc và tự động đánh giá lại toàn bộ hồ sơ hóa đơn!');
-    setTimeout(() => setSaveToast(null), 4000);
+    if (isSavingSettings) return;
+    setIsSavingSettings(true);
+    try {
+      const saved = await mockActions.updateRuleSettings(localSettings);
+      setLocalSettings(saved);
+      setSaveToast({ type: 'success', message: 'Đã lưu cấu hình quy tắc vào MySQL.' });
+      setTimeout(() => setSaveToast(null), 4000);
+    } catch (error) {
+      setSaveToast({
+        type: 'error',
+        message: error instanceof Error ? `Không lưu được cấu hình: ${error.message}` : 'Không lưu được cấu hình vào MySQL.',
+      });
+    } finally {
+      setIsSavingSettings(false);
+    }
   };
 
-  const handleExport = async (format: 'EXCEL' | 'CSV' | 'MISA') => {
+  const handleExport = async (format: 'EXCEL' | 'CSV' | 'XML') => {
     const time = new Date().toISOString().substring(0, 10);
     if (format === 'EXCEL' || format === 'CSV') {
       try {
@@ -70,25 +85,26 @@ export const ReportsAndSettingsModule: React.FC<ReportsAndSettingsModuleProps> =
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
-        setSaveToast(`Đã xuất thành công tệp ${format} từ máy chủ!`);
+        setSaveToast({ type: 'success', message: `Đã xuất thành công tệp ${format} từ máy chủ!` });
         setTimeout(() => setSaveToast(null), 4000);
         return;
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Không thể tải tệp';
-        setSaveToast(`Lỗi xuất ${format} từ máy chủ: ${msg}`);
+        setSaveToast({ type: 'error', message: `Lỗi xuất ${format} từ máy chủ: ${msg}` });
         setTimeout(() => setSaveToast(null), 5000);
         return;
       }
     }
 
-    const filename = `BaoCao_DoiSoat_HoaDon_MISA_${time}.xml`;
-    const content = `<?xml version="1.0" encoding="utf-8"?>
-<MISA_VAT_INVOICES version="2026.1" export_date="${time}">
-  <Company TaxCode="0109876543">CÔNG TY TNHH CÔNG NGHỆ & TỰ ĐỘNG HÓA THÔNG MINH VIỆT NAM</Company>
-  <Invoices count="${approvedInvoices.length}">
-${approvedInvoices.map(inv => `    <Invoice Code="${inv.code}" Number="${inv.header.invoiceNumber}" Series="${inv.header.invoiceSeries}" Date="${inv.header.issueDate}" SellerMST="${inv.header.sellerTaxCode}" Total="${inv.header.grandTotal}" Status="APPROVED" />`).join('\n')}
-  </Invoices>
-</MISA_VAT_INVOICES>`;
+    const filename = `BaoCao_HoaDon_DaDuyet_${time}.xml`;
+    const content = buildInvoiceXmlExport(approvedInvoices.map((invoice) => ({
+      code: invoice.code,
+      invoiceNumber: invoice.header.invoiceNumber,
+      series: invoice.header.invoiceSeries,
+      issueDate: invoice.header.issueDate,
+      sellerTaxCode: invoice.header.sellerTaxCode,
+      total: invoice.header.grandTotal,
+    })), time);
 
     const blob = new Blob([content], { type: 'application/xml;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -100,7 +116,7 @@ ${approvedInvoices.map(inv => `    <Invoice Code="${inv.code}" Number="${inv.hea
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
-    setSaveToast(`Đã xuất thành công tệp: ${filename}`);
+    setSaveToast({ type: 'success', message: `Đã xuất XML tham khảo: ${filename}. Đây không phải mẫu nhập chính thức của phần mềm kế toán.` });
     setTimeout(() => setSaveToast(null), 4000);
   };
 
@@ -114,24 +130,26 @@ ${approvedInvoices.map(inv => `    <Invoice Code="${inv.code}" Number="${inv.hea
             Báo Cáo Định Kỳ, Đồng Bộ Kế Toán & Cấu Hình Hệ Thống
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Xuất dữ liệu chuẩn hạch toán MISA/ERP, điều chỉnh ngưỡng dung sai và nhật ký bảo mật
+            Tải báo cáo hóa đơn, chỉnh ngưỡng đối soát và xem nhật ký thao tác
           </p>
         </div>
 
         <button
-          onClick={() => setShowMisaPreview(true)}
+          onClick={() => setShowXmlPreview(true)}
           className="cursor-pointer inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-emerald-700 shadow-sm transition-colors"
         >
           <FileCode className="h-4 w-4" />
-          Xuất File Chuẩn MISA / ERP ({approvedInvoices.length} HĐ Khớp)
+          Xuất XML tham khảo ({approvedInvoices.length} hóa đơn đã duyệt)
         </button>
       </div>
 
       {saveToast && (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800 flex items-center justify-between animate-fade-in">
+        <div className={`rounded-xl border p-3 text-xs flex items-center justify-between animate-fade-in ${saveToast.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-rose-200 bg-rose-50 text-rose-800'}`} role={saveToast.type === 'error' ? 'alert' : 'status'}>
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-            <span>{saveToast}</span>
+            {saveToast.type === 'success'
+              ? <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+              : <X className="h-4 w-4 text-rose-600 shrink-0" />}
+            <span>{saveToast.message}</span>
           </div>
           <button onClick={() => setSaveToast(null)} className="font-bold">
             ✕
@@ -178,24 +196,24 @@ ${approvedInvoices.map(inv => `    <Invoice Code="${inv.code}" Number="${inv.hea
         </button>
       </div>
 
-      {/* TAB 1: KỲ BÁO CÁO & XUẤT DỮ LIỆU */}
+      {/* TAB 1: BÁO CÁO VÀ XUẤT DỮ LIỆU */}
       {activeTab === 'REPORTS' && (
         <div className="rounded-b-xl border border-slate-200 bg-white p-6 shadow-xs space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* Thẻ Báo cáo Ngày */}
+            {/* Thẻ báo cáo tổng hợp từ máy chủ */}
             <div className="rounded-xl border border-slate-200 p-4 hover:border-blue-300 transition-colors flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between">
                   <span className="font-mono text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
-                    DAILY REPORT
+                    BÁO CÁO
                   </span>
-                  <span className="text-[11px] text-slate-400">APScheduler 17:30</span>
+                  <span className="text-[11px] text-slate-400">Dữ liệu từ máy chủ</span>
                 </div>
                 <h3 className="font-bold text-slate-900 mt-2 text-sm">
-                  Báo Cáo Đối Soát Cuối Ngày
+                  Báo Cáo Hóa Đơn Tổng Hợp
                 </h3>
                 <p className="text-xs text-slate-500 mt-1">
-                  Tổng hợp toàn bộ chứng từ phát sinh trong ca làm việc, tỷ lệ khớp và các sai lệch giá/số lượng.
+                  Tải danh sách hóa đơn hiện có trong hệ thống dưới dạng Excel hoặc CSV.
                 </p>
               </div>
               <div className="mt-4 pt-3 border-t border-slate-100 flex items-center gap-2">
@@ -214,61 +232,29 @@ ${approvedInvoices.map(inv => `    <Invoice Code="${inv.code}" Number="${inv.hea
               </div>
             </div>
 
-            {/* Thẻ Báo cáo Tuần */}
-            <div className="rounded-xl border border-slate-200 p-4 hover:border-blue-300 transition-colors flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-xs font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">
-                    WEEKLY AUDIT
-                  </span>
-                  <span className="text-[11px] text-slate-400">Thứ 6 hàng tuần</span>
-                </div>
-                <h3 className="font-bold text-slate-900 mt-2 text-sm">
-                  Báo Cáo Đánh Giá Nhà Cung Cấp
-                </h3>
-                <p className="text-xs text-slate-500 mt-1">
-                  Xếp hạng nhà cung cấp theo tỷ lệ hóa đơn bị lỗi, sai lệch đơn giá hoặc giao thiếu hàng nhập kho.
-                </p>
-              </div>
-              <div className="mt-4 pt-3 border-t border-slate-100 flex items-center gap-2">
-                <button
-                  onClick={() => handleExport('EXCEL')}
-                  className="cursor-pointer flex-1 rounded-lg bg-slate-100 hover:bg-slate-200 py-1.5 text-xs font-semibold text-slate-800 text-center"
-                >
-                  Xuất Excel (.xlsx)
-                </button>
-                <button
-                  onClick={() => handleExport('CSV')}
-                  className="cursor-pointer flex-1 rounded-lg bg-slate-100 hover:bg-slate-200 py-1.5 text-xs font-semibold text-slate-800 text-center"
-                >
-                  Xuất CSV (.csv)
-                </button>
-              </div>
-            </div>
-
-            {/* Thẻ Đồng bộ MISA / ERP */}
+            {/* Thẻ XML tham khảo; chưa phải định dạng tích hợp với phần mềm kế toán */}
             <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50/40 p-4 flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between">
                   <span className="font-mono text-xs font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded">
-                    MISA SME / FAST / BRAVO
+                    XML
                   </span>
-                  <span className="text-[11px] text-emerald-700 font-bold">Chuẩn hạch toán</span>
+                  <span className="text-[11px] text-emerald-700 font-bold">Tham khảo</span>
                 </div>
                 <h3 className="font-bold text-emerald-950 mt-2 text-sm">
-                  Đồng Bộ Hạch Toán Kế Toán
+                  Xuất dữ liệu hóa đơn
                 </h3>
                 <p className="text-xs text-slate-600 mt-1">
-                  Đóng gói các hóa đơn đã được Kế toán trưởng duyệt thành file XML/Excel chuẩn để nạp trực tiếp vào phần mềm kế toán.
+                  Xuất các hóa đơn đã duyệt thành XML tổng quát để xem hoặc xử lý tiếp. Định dạng nhập vào MISA/ERP chưa được tích hợp.
                 </p>
               </div>
               <div className="mt-4 pt-3 border-t border-emerald-200">
                 <button
-                  onClick={() => handleExport('MISA')}
+                  onClick={() => handleExport('XML')}
                   className="cursor-pointer w-full rounded-lg bg-emerald-600 hover:bg-emerald-700 py-2 text-xs font-bold text-white text-center shadow-xs flex items-center justify-center gap-1.5"
                 >
                   <Download className="h-4 w-4" />
-                  Tải File Import MISA (.xml) Ngay
+                  Tải XML tham khảo
                 </button>
               </div>
             </div>
@@ -390,7 +376,7 @@ ${approvedInvoices.map(inv => `    <Invoice Code="${inv.code}" Number="${inv.hea
                 </select>
               </div>
               <p className="text-[11px] text-slate-400">
-                Tần suất RPA tự động kiểm tra hòm thư Email nhận hóa đơn và thư mục chia sẻ nội bộ.
+                Chu kỳ áp dụng khi có cấu hình thư mục inbox cục bộ. Email và thư mục SMB chưa được tích hợp.
               </p>
             </div>
           </div>
@@ -414,7 +400,7 @@ ${approvedInvoices.map(inv => `    <Invoice Code="${inv.code}" Number="${inv.hea
                   }
                   className="rounded text-blue-600"
                 />
-                Gửi Email cảnh báo khi phát hiện sai lệch giá/số lượng
+                Email cảnh báo (tùy chọn lưu cấu hình; chưa tích hợp gửi)
               </label>
 
               <label className="flex items-center gap-2 cursor-pointer">
@@ -429,7 +415,7 @@ ${approvedInvoices.map(inv => `    <Invoice Code="${inv.code}" Number="${inv.hea
                   }
                   className="rounded text-blue-600"
                 />
-                Bắn tin nhắn thông báo tức thì qua Telegram Bot Kế toán
+                Telegram (tùy chọn lưu cấu hình; chưa tích hợp gửi)
               </label>
             </div>
           </div>
@@ -437,10 +423,11 @@ ${approvedInvoices.map(inv => `    <Invoice Code="${inv.code}" Number="${inv.hea
           <div className="pt-4 border-t border-slate-200 flex justify-end">
             <button
               type="submit"
-              className="cursor-pointer inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2 text-xs font-bold text-white hover:bg-blue-700 shadow-sm transition-colors"
+              disabled={isSavingSettings}
+              className="cursor-pointer inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2 text-xs font-bold text-white hover:bg-blue-700 shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Save className="h-4 w-4" />
-              Lưu Cấu Hình & Chạy Lại Bộ Quy Tắc
+              {isSavingSettings ? 'Đang lưu...' : 'Lưu cấu hình'}
             </button>
           </div>
         </form>
@@ -454,7 +441,7 @@ ${approvedInvoices.map(inv => `    <Invoice Code="${inv.code}" Number="${inv.hea
               Lịch sử Hoạt động & Ghi nhận Thao tác Kế toán (System Audit Logs)
             </div>
             <span className="text-[11px] text-slate-500 font-mono">
-              Bảo mật theo tiêu chuẩn ISO 27001
+              Nhật ký ghi nhận từ API máy chủ
             </span>
           </div>
 
@@ -479,7 +466,7 @@ ${approvedInvoices.map(inv => `    <Invoice Code="${inv.code}" Number="${inv.hea
                       </td>
                       <td className="py-2.5 px-3">
                         <div className="font-semibold text-slate-900">{ev.actor}</div>
-                        <div className="text-[10px] text-blue-600 font-medium">Hệ thống</div>
+                        <div className="text-[10px] text-blue-600 font-medium">{ev.actor_role || 'Chưa rõ vai trò'}</div>
                       </td>
                       <td className="py-2.5 px-3 font-mono font-bold text-slate-800">
                         {ev.entity}
@@ -491,38 +478,10 @@ ${approvedInvoices.map(inv => `    <Invoice Code="${inv.code}" Number="${inv.hea
                         <span className="text-slate-800">{ev.detail || '--'}</span>
                       </td>
                       <td className="py-2.5 px-4 text-slate-600 max-w-[260px] truncate" title={ev.detail}>
-                        Ghi nhận API kiểm toán
+                        {ev.detail || '—'}
                       </td>
                     </tr>
                   ))
-                ) : invoices.flatMap((inv) => inv.auditLogs).length > 0 ? (
-                  invoices.flatMap((inv) =>
-                    inv.auditLogs.map((log) => (
-                      <tr key={log.id} className="hover:bg-slate-50">
-                        <td className="py-2.5 px-4 font-mono text-[11px] text-slate-500 whitespace-nowrap">
-                          {log.timestamp}
-                        </td>
-                        <td className="py-2.5 px-3">
-                          <div className="font-semibold text-slate-900">{log.user}</div>
-                          <div className="text-[10px] text-blue-600 font-medium">{log.userRole}</div>
-                        </td>
-                        <td className="py-2.5 px-3 font-mono font-bold text-slate-800">
-                          {log.invoiceCode}
-                        </td>
-                        <td className="py-2.5 px-3 font-medium text-slate-900">
-                          {log.field}
-                        </td>
-                        <td className="py-2.5 px-3 font-mono text-[11px]">
-                          <span className="text-rose-600 line-through mr-1">{log.oldValue}</span>
-                          &rarr;
-                          <span className="text-emerald-700 font-bold ml-1">{log.newValue}</span>
-                        </td>
-                        <td className="py-2.5 px-4 text-slate-600 max-w-[260px] truncate" title={log.reason}>
-                          {log.reason}
-                        </td>
-                      </tr>
-                    ))
-                  )
                 ) : (
                   <tr>
                     <td colSpan={6} className="py-8 text-center text-slate-400">
@@ -536,19 +495,19 @@ ${approvedInvoices.map(inv => `    <Invoice Code="${inv.code}" Number="${inv.hea
         </div>
       )}
 
-      {/* MODAL XEM TRƯỚC VÀ XUẤT FILE MISA / ERP */}
-      {showMisaPreview && (
+      {/* MODAL XEM TRƯỚC VÀ XUẤT XML THAM KHẢO */}
+      {showXmlPreview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-fade-in">
           <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl border border-slate-200">
             <div className="flex items-center justify-between border-b border-slate-200 pb-3 mb-4">
               <div className="flex items-center gap-2">
                 <FileCode className="h-5 w-5 text-emerald-600" />
                 <h3 className="text-sm font-bold text-slate-900">
-                  Xem Trước Cấu Trúc Xuất File Chuẩn Hạch Toán MISA / ERP
+                  Xem trước XML tham khảo
                 </h3>
               </div>
               <button
-                onClick={() => setShowMisaPreview(false)}
+                onClick={() => setShowXmlPreview(false)}
                 className="cursor-pointer text-slate-400 hover:text-slate-600"
               >
                 <X className="h-5 w-5" />
@@ -556,35 +515,35 @@ ${approvedInvoices.map(inv => `    <Invoice Code="${inv.code}" Number="${inv.hea
             </div>
 
             <div className="text-xs text-slate-600 mb-3">
-              Dưới đây là danh sách {approvedInvoices.length} hóa đơn đã đối soát khớp 3 bên và được phê duyệt hạch toán, sẵn sàng đưa vào bảng kê chứng từ mua hàng:
+              Có {approvedInvoices.length} hóa đơn đã duyệt. XML này chỉ là định dạng tham khảo, chưa thể khẳng định tương thích với MISA/ERP.
             </div>
 
             <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-slate-900 text-slate-200 p-3 font-mono text-[11px] leading-relaxed">
               &lt;?xml version="1.0" encoding="utf-8"?&gt;<br />
-              &lt;MISA_VAT_INVOICES export_version="2026.1"&gt;<br />
+              &lt;invoice_export version="1"&gt;<br />
               {approvedInvoices.map((inv) => (
                 <div key={inv.code} className="pl-4 text-emerald-400">
-                  &lt;Invoice Code="{inv.code}" Number="{inv.header.invoiceNumber}" Series="{inv.header.invoiceSeries}" SellerTaxCode="{inv.header.sellerTaxCode}" Total="{inv.header.grandTotal}" PO="{inv.header.poCode}" /&gt;
+                  &lt;invoice code="{inv.code}" invoice_number="{inv.header.invoiceNumber}" series="{inv.header.invoiceSeries}" seller_tax_code="{inv.header.sellerTaxCode}" total="{inv.header.grandTotal ?? ''}" /&gt;
                 </div>
               ))}
-              &lt;/MISA_VAT_INVOICES&gt;
+              &lt;/invoice_export&gt;
             </div>
 
             <div className="mt-4 pt-3 border-t border-slate-200 flex items-center justify-between">
               <span className="text-[11px] text-slate-500">
-                Định dạng: Chuẩn XML trao đổi dữ liệu Cục Thuế & MISA SME 2026
+                XML tổng quát do ứng dụng tạo; không phải định dạng nhập liệu đã xác nhận
               </span>
               <div className="flex gap-2">
                 <button
-                  onClick={() => setShowMisaPreview(false)}
+                  onClick={() => setShowXmlPreview(false)}
                   className="cursor-pointer rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
                 >
                   Đóng
                 </button>
                 <button
                   onClick={() => {
-                    handleExport('MISA');
-                    setShowMisaPreview(false);
+                    handleExport('XML');
+                    setShowXmlPreview(false);
                   }}
                   className="cursor-pointer rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 flex items-center gap-1.5"
                 >

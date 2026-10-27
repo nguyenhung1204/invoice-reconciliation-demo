@@ -205,6 +205,11 @@ export const InvoiceDocumentViewer: React.FC<InvoiceDocumentViewerProps> = ({
               <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
               Tổng cục Thuế: Đang hoạt động bình thường
             </span>
+          ) : invoice.header.taxStatus === 'UNKNOWN' ? (
+            <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600 border border-slate-200">
+              <AlertTriangle className="h-3.5 w-3.5 text-slate-500" />
+              Chưa có kết quả tra cứu mã số thuế
+            </span>
           ) : (
             <span className="inline-flex items-center gap-1 rounded bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-700 border border-rose-200">
               <AlertTriangle className="h-3.5 w-3.5 text-rose-600" />

@@ -40,6 +40,8 @@ export const SplitScreenMatchingModule: React.FC<SplitScreenMatchingModuleProps>
   const [selectedFieldKey, setSelectedFieldKey] = useState<string | null>(null);
   const [editReason, setEditReason] = useState<string>('');
   const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [lineNameDrafts, setLineNameDrafts] = useState<Record<number, string>>({});
+  const [isSavingAction, setIsSavingAction] = useState(false);
 
   // Local state cho các trường Header chỉnh sửa
   const [headerForm, setHeaderForm] = useState({
@@ -63,6 +65,8 @@ export const SplitScreenMatchingModule: React.FC<SplitScreenMatchingModuleProps>
       poCode: currentInvoice.header.poCode,
     });
     setEditReason('');
+    setLineNameDrafts({});
+    setFeedbackMessage(null);
   }, [currentInvoice?.code]);
 
   if (!currentInvoice) {
@@ -94,53 +98,54 @@ export const SplitScreenMatchingModule: React.FC<SplitScreenMatchingModuleProps>
   // Cập nhật giá trị dòng hàng inline
   const handleLineItemChange = (
     lineNo: number,
-    field: 'itemNameInvoice' | 'quantityInvoice' | 'unitPriceInvoice',
     value: string
   ) => {
-    store.updateInvoiceLineItem(
-      currentInvoice.code,
-      lineNo,
-      field,
-      field === 'itemNameInvoice' ? value : Number(value) || 0,
-      editReason || 'Kế toán viên hiệu chỉnh dữ liệu dòng hàng'
-    );
-    setFeedbackMessage({
-      type: 'success',
-      text: `Đã cập nhật dòng #${lineNo} và tính toán lại đối soát 3 bên tự động.`,
-    });
-    setTimeout(() => setFeedbackMessage(null), 3500);
+    setLineNameDrafts((previous) => ({ ...previous, [lineNo]: value }));
   };
 
   // Lưu chỉnh sửa Header & Chạy lại đối soát
-  const handleSaveHeaderAndRecalculate = () => {
-    Object.entries(headerForm).forEach(([key, val]) => {
-      if ((currentInvoice.header as any)[key] !== val) {
-        store.updateInvoiceHeaderField(
-          currentInvoice.code,
-          key as any,
-          val,
-          editReason || 'Kế toán viên hiệu chỉnh thông tin chung'
-        );
-      }
-    });
-
-    setFeedbackMessage({
-      type: 'success',
-      text: 'Đã lưu chỉnh sửa thủ công và chạy lại thuật toán đối soát 3 bên thành công.',
-    });
-    setTimeout(() => setFeedbackMessage(null), 3500);
+  const handleSaveHeaderAndRecalculate = async () => {
+    if (isSavingAction) return;
+    setIsSavingAction(true);
+    setFeedbackMessage(null);
+    try {
+      const saved = await store.saveInvoiceReviewAndReconcile(currentInvoice.code, {
+        header: headerForm,
+        lineNameUpdates: lineNameDrafts,
+        note: editReason || 'Kế toán viên hiệu chỉnh thông tin hóa đơn',
+      });
+      setLineNameDrafts({});
+      setFeedbackMessage({
+        type: 'success',
+        text: saved.status === 'MATCHED'
+          ? 'Đã lưu dữ liệu vào MySQL và đối soát khớp.'
+          : 'Đã lưu dữ liệu vào MySQL và chạy đối soát. Hệ thống đang hiển thị các sai lệch cần xử lý.',
+      });
+    } catch (error) {
+      setFeedbackMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Không thể lưu và đối soát hóa đơn.',
+      });
+    } finally {
+      setIsSavingAction(false);
+    }
   };
 
   // Phê duyệt thanh toán
   const handleApprove = async () => {
-    await mockActions.verifyInvoice(currentInvoice.code, 'APPROVE', {
-      note: editReason || 'Kế toán trưởng phê duyệt hạch toán thanh toán.',
-    });
-    setFeedbackMessage({
-      type: 'success',
-      text: `Hóa đơn ${currentInvoice.code} đã được PHÊ DUYỆT THANH TOÁN thành công!`,
-    });
-    setTimeout(() => setFeedbackMessage(null), 4000);
+    if (isSavingAction) return;
+    setIsSavingAction(true);
+    setFeedbackMessage(null);
+    try {
+      await mockActions.verifyInvoice(currentInvoice.code, 'APPROVE', {
+        note: editReason || 'Kế toán trưởng phê duyệt hạch toán thanh toán.',
+      });
+      setFeedbackMessage({ type: 'success', text: `Hóa đơn ${currentInvoice.code} đã được phê duyệt trên máy chủ.` });
+    } catch (error) {
+      setFeedbackMessage({ type: 'error', text: error instanceof Error ? error.message : 'Không thể phê duyệt hóa đơn.' });
+    } finally {
+      setIsSavingAction(false);
+    }
   };
 
   // Từ chối hóa đơn
@@ -153,12 +158,17 @@ export const SplitScreenMatchingModule: React.FC<SplitScreenMatchingModuleProps>
       setTimeout(() => setFeedbackMessage(null), 3500);
       return;
     }
-    await mockActions.verifyInvoice(currentInvoice.code, 'REJECT', { note: editReason });
-    setFeedbackMessage({
-      type: 'success',
-      text: `Hóa đơn ${currentInvoice.code} đã bị TỪ CHỐI. Yêu cầu NCC xuất hóa đơn điều chỉnh.`,
-    });
-    setTimeout(() => setFeedbackMessage(null), 4000);
+    if (isSavingAction) return;
+    setIsSavingAction(true);
+    setFeedbackMessage(null);
+    try {
+      await mockActions.verifyInvoice(currentInvoice.code, 'REJECT', { note: editReason });
+      setFeedbackMessage({ type: 'success', text: `Hóa đơn ${currentInvoice.code} đã được từ chối và lưu trên máy chủ.` });
+    } catch (error) {
+      setFeedbackMessage({ type: 'error', text: error instanceof Error ? error.message : 'Không thể từ chối hóa đơn.' });
+    } finally {
+      setIsSavingAction(false);
+    }
   };
 
   return (
@@ -207,9 +217,14 @@ export const SplitScreenMatchingModule: React.FC<SplitScreenMatchingModuleProps>
         {/* Trạng thái hiện tại */}
         <div className="flex items-center gap-2 text-xs">
           <span className="text-slate-500">Trạng thái:</span>
+          {currentInvoice.status === 'APPROVED' && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 font-bold text-emerald-800">
+              <CheckCircle2 className="h-3.5 w-3.5" /> Đã phê duyệt
+            </span>
+          )}
           {currentInvoice.status === 'MATCHED' && (
             <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 font-bold text-emerald-800">
-              <CheckCircle2 className="h-3.5 w-3.5" /> Khớp 100%
+              <CheckCircle2 className="h-3.5 w-3.5" /> Đối soát khớp
             </span>
           )}
           {currentInvoice.status === 'MISMATCH' && (
@@ -220,6 +235,11 @@ export const SplitScreenMatchingModule: React.FC<SplitScreenMatchingModuleProps>
           {currentInvoice.status === 'NEED_CONFIRM' && (
             <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 font-bold text-amber-800">
               <Clock className="h-3.5 w-3.5" /> Cần xác nhận thủ công
+            </span>
+          )}
+          {currentInvoice.status === 'OCR_REVIEWED' && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2.5 py-0.5 font-bold text-blue-800">
+              <CheckCircle2 className="h-3.5 w-3.5" /> Đã rà soát OCR
             </span>
           )}
           {currentInvoice.status === 'REJECTED' && (
@@ -467,9 +487,9 @@ export const SplitScreenMatchingModule: React.FC<SplitScreenMatchingModuleProps>
                         <div className="text-[11px] font-medium text-slate-900">
                           <input
                             type="text"
-                            value={item.itemNameInvoice}
+                            value={lineNameDrafts[item.lineNo] ?? item.itemNameInvoice}
                             onChange={(e) =>
-                              handleLineItemChange(item.lineNo, 'itemNameInvoice', e.target.value)
+                              handleLineItemChange(item.lineNo, e.target.value)
                             }
                             className="w-full rounded border border-slate-300 px-1.5 py-0.5 text-xs focus:border-blue-500 focus:outline-none"
                             title="Sửa tên trích xuất OCR"
@@ -616,27 +636,30 @@ export const SplitScreenMatchingModule: React.FC<SplitScreenMatchingModuleProps>
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <button
                 onClick={handleSaveHeaderAndRecalculate}
+                disabled={isSavingAction || currentInvoice.status === 'APPROVED'}
                 className="cursor-pointer inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-blue-700 shadow-sm transition-colors"
               >
                 <Save className="h-3.5 w-3.5" />
-                Lưu chỉnh sửa & Chạy lại đối soát
+                {isSavingAction ? 'Đang lưu...' : 'Lưu chỉnh sửa & Chạy lại đối soát'}
               </button>
 
-              <button
+              {(currentUser.role === 'CHIEF_ACCOUNTANT' || currentUser.role === 'ADMIN') && <button
                 onClick={handleApprove}
-                className="cursor-pointer inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-emerald-700 shadow-sm transition-colors"
+                disabled={isSavingAction || currentInvoice.status !== 'MATCHED'}
+                className="cursor-pointer inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-emerald-700 shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <CheckCircle2 className="h-3.5 w-3.5" />
                 Xác nhận Khớp / Phê duyệt thanh toán
-              </button>
+              </button>}
 
-              <button
+              {(currentUser.role === 'CHIEF_ACCOUNTANT' || currentUser.role === 'ADMIN') && <button
                 onClick={handleReject}
-                className="cursor-pointer inline-flex items-center gap-1.5 rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100 transition-colors"
+                disabled={isSavingAction || currentInvoice.status === 'APPROVED' || currentInvoice.status === 'REJECTED'}
+                className="cursor-pointer inline-flex items-center gap-1.5 rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <XCircle className="h-3.5 w-3.5" />
                 Từ chối / Yêu cầu xuất lại HĐ
-              </button>
+              </button>}
             </div>
 
             {/* BẢNG LƯU VẾT KIỂM TOÁN (AUDIT LOGS) */}

@@ -21,7 +21,6 @@ import {
   Pencil,
   Trash2,
   Download,
-  RefreshCw,
   ChevronDown,
   ChevronUp,
   Receipt,
@@ -38,7 +37,7 @@ import {
   Employee,
 } from '../../types/index.ts';
 import { formatCurrencyVND } from '../../utils/matchingEngine.ts';
-import { store } from '../../services/api.ts';
+import { api, store } from '../../services/api.ts';
 
 interface MasterDataModuleProps {
   purchaseOrders: PurchaseOrder[];
@@ -100,7 +99,8 @@ export const MasterDataModule: React.FC<MasterDataModuleProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [successToast, setSuccessToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; error: boolean } | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
   const [expandedPoCode, setExpandedPoCode] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -132,6 +132,8 @@ export const MasterDataModule: React.FC<MasterDataModuleProps> = ({
     supplierName: '',
     supplierTaxCode: '',
     employeeCode: '',
+    orderDate: new Date().toISOString().slice(0, 10),
+    expectedDeliveryDate: '',
     items: [{ itemName: '', unit: 'Chiếc', quantity: 1, unitPrice: 0 }],
   });
 
@@ -147,9 +149,9 @@ export const MasterDataModule: React.FC<MasterDataModuleProps> = ({
     notes: '',
   });
 
-  const showToast = (msg: string) => {
-    setSuccessToast(msg);
-    setTimeout(() => setSuccessToast(null), 4000);
+  const showToast = (msg: string, error = false) => {
+    setToast({ message: msg, error });
+    setTimeout(() => setToast(null), 5000);
   };
 
   const canManage = currentUser.role === 'ADMIN' || currentUser.role === 'CHIEF_ACCOUNTANT';
@@ -256,6 +258,13 @@ export const MasterDataModule: React.FC<MasterDataModuleProps> = ({
   };
 
   const renderLegalStatus = (status: SupplierMaster['legalStatus']) => {
+    if (status === 'UNKNOWN') {
+      return (
+        <span className="inline-flex items-center rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+          Chưa tra cứu
+        </span>
+      );
+    }
     if (status === 'ACTIVE') {
       return (
         <span className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
@@ -290,6 +299,8 @@ export const MasterDataModule: React.FC<MasterDataModuleProps> = ({
         supplierName: suppliers[0]?.name || '',
         supplierTaxCode: suppliers[0]?.taxCode || '',
         employeeCode: employees.find((e) => e.fullName === currentUser.name)?.code || '',
+        orderDate: new Date().toISOString().slice(0, 10),
+        expectedDeliveryDate: '',
         items: [{ itemName: '', unit: 'Chiếc', quantity: 1, unitPrice: 0 }],
       });
     } else if (activeTab === 'GR') {
@@ -329,6 +340,8 @@ export const MasterDataModule: React.FC<MasterDataModuleProps> = ({
         supplierName: item.supplierName,
         supplierTaxCode: item.supplierTaxCode,
         employeeCode: item.employeeCode || '',
+        orderDate: item.orderDate || '',
+        expectedDeliveryDate: item.expectedDeliveryDate || '',
         items: item.items.map((it: any) => ({
           itemName: it.itemName,
           unit: it.unit,
@@ -382,29 +395,32 @@ export const MasterDataModule: React.FC<MasterDataModuleProps> = ({
   };
 
   // Delete item with permission check
-  const handleDelete = (code: string) => {
+  const handleDelete = async (code: string) => {
     if (!canManage) {
       alert('🔒 Bạn không có quyền xóa. Chỉ Admin hoặc Kế toán trưởng được phép xóa danh mục.');
       return;
     }
     if (confirm(`Xác nhận xóa mục có mã ${code}?`)) {
       try {
-        if (activeTab === 'SUPPLIERS') store.deleteSupplier(code);
-        else if (activeTab === 'CATEGORIES') store.deleteProductCategory(code);
-        else if (activeTab === 'PRODUCTS') store.deleteProduct(code);
-        else if (activeTab === 'CUSTOMERS') store.deleteCustomer(code);
-        else if (activeTab === 'EMPLOYEES') store.deleteEmployee(code);
-        else if (activeTab === 'PO') store.deletePurchaseOrder(code);
+        if (activeTab === 'SUPPLIERS') await store.deleteSupplier(code);
+        else if (activeTab === 'CATEGORIES') await store.deleteProductCategory(code);
+        else if (activeTab === 'PRODUCTS') await store.deleteProduct(code);
+        else if (activeTab === 'CUSTOMERS') await store.deleteCustomer(code);
+        else if (activeTab === 'EMPLOYEES') await store.deleteEmployee(code);
+        else if (activeTab === 'PO') await store.deletePurchaseOrder(code);
+        else if (activeTab === 'GR') await store.deleteGoodsReceipt(code);
         showToast(`Đã xóa mục ${code} thành công!`);
       } catch (err: any) {
-        showToast(`Lỗi: ${err.message || err}`);
+        showToast(`Không xóa được ${code}: ${err.message || err}`, true);
       }
     }
   };
 
   // Submit Modal Form
-  const handleSubmitForm = (e: React.FormEvent) => {
+  const handleSubmitForm = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return;
+    setIsSaving(true);
     try {
       if (activeTab === 'PO') {
         const total = poForm.items.reduce((sum, it) => sum + it.quantity * it.unitPrice, 0);
@@ -415,8 +431,8 @@ export const MasterDataModule: React.FC<MasterDataModuleProps> = ({
           supplierName: poForm.supplierName || sup?.name || '',
           supplierTaxCode: poForm.supplierTaxCode || sup?.taxCode || '',
           employeeCode: editingId ? poForm.employeeCode : employees.find((emp) => emp.fullName === currentUser.name)?.code || '',
-          orderDate: new Date().toISOString().substring(0, 10),
-          expectedDeliveryDate: new Date().toISOString().substring(0, 10),
+          orderDate: poForm.orderDate,
+          expectedDeliveryDate: poForm.expectedDeliveryDate,
           totalEstimatedAmount: total,
           status: 'PENDING',
           poStatus: 'Mới tạo',
@@ -430,8 +446,8 @@ export const MasterDataModule: React.FC<MasterDataModuleProps> = ({
             amount: Number(it.quantity) * Number(it.unitPrice),
           })),
         };
-        if (editingId) store.updatePurchaseOrder(editingId, newPo);
-        else store.addPurchaseOrder(newPo);
+        if (editingId) await store.updatePurchaseOrder(editingId, newPo);
+        else await store.addPurchaseOrder(newPo);
       } else if (activeTab === 'GR') {
         const newGr: GoodsReceipt = {
           code: grForm.code,
@@ -450,35 +466,37 @@ export const MasterDataModule: React.FC<MasterDataModuleProps> = ({
             },
           ],
         };
-        store.addGoodsReceipt(newGr);
+        await store.addGoodsReceipt(newGr);
       } else if (activeTab === 'SUPPLIERS') {
         const newSup: SupplierMaster = {
           ...supplierForm,
-          legalStatus: 'ACTIVE',
+          legalStatus: 'UNKNOWN',
           anchorKeywords: [supplierForm.name.split(' ')[0]],
           totalInvoicesReceived: 0,
           mismatchRate: 0,
         };
-        if (editingId) store.updateSupplier(editingId, newSup);
-        else store.addSupplier(newSup);
+        if (editingId) await store.updateSupplier(editingId, newSup);
+        else await store.addSupplier(newSup);
       } else if (activeTab === 'CATEGORIES') {
-        if (editingId) store.updateProductCategory(editingId, categoryForm);
-        else store.addProductCategory(categoryForm);
+        if (editingId) await store.updateProductCategory(editingId, categoryForm);
+        else await store.addProductCategory(categoryForm);
       } else if (activeTab === 'PRODUCTS') {
-        if (editingId) store.updateProduct(editingId, productForm);
-        else store.addProduct(productForm);
+        if (editingId) await store.updateProduct(editingId, productForm);
+        else await store.addProduct(productForm);
       } else if (activeTab === 'CUSTOMERS') {
-        if (editingId) store.updateCustomer(editingId, customerForm);
-        else store.addCustomer(customerForm);
+        if (editingId) await store.updateCustomer(editingId, customerForm);
+        else await store.addCustomer(customerForm);
       } else if (activeTab === 'EMPLOYEES') {
-        if (editingId) store.updateEmployee(editingId, employeeForm);
-        else store.addEmployee(employeeForm);
+        if (editingId) await store.updateEmployee(editingId, employeeForm);
+        else await store.addEmployee(employeeForm);
       }
 
       showToast(editingId ? 'Đã cập nhật thành công!' : 'Đã thêm mới thành công!');
       setShowModal(false);
     } catch (err: any) {
-      showToast(`Lỗi: ${err.message || err}`);
+      showToast(`Chưa lưu được dữ liệu: ${err.message || err}`, true);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -488,25 +506,25 @@ export const MasterDataModule: React.FC<MasterDataModuleProps> = ({
     let csvContent = '\uFEFF';
     if (tab === 'PO') {
       filename = 'Mau_Don_Hang_PO.csv';
-      csvContent += 'Mã PO,Nhà cung cấp,Mã số thuế,Tên hàng hóa,Đơn vị tính,Số lượng,Đơn giá\nPO-2026-0001,Công ty Cổ phần Digiworld,0302888783,Chuột Logitech MX Master 3S,Chiếc,20,2100000';
+      csvContent += 'po_number,supplier_tax_code,total_amount,order_date,expected_delivery_date,employee_code,lines_json\nPO-2026-0001,0302888783,42000000,2026-10-27,2026-11-03,NV-01,"[{""name"":""Chuột Logitech MX Master 3S"",""unit"":""Chiếc"",""quantity"":20,""unit_price"":2100000}]"';
     } else if (tab === 'GR') {
       filename = 'Mau_Phieu_Nhap_Kho.csv';
-      csvContent += 'Mã phiếu kho,Mã PO,Nhà cung cấp,Tên hàng hóa,Đơn vị tính,Số lượng thực nhận\nPNK-2026-0001,PO-2026-0001,Công ty Cổ phần Digiworld,Chuột Logitech MX Master 3S,Chiếc,20';
+      csvContent += 'receipt_number,po_number,received_by,warehouse_location,lines_json\nPNK-2026-0001,PO-2026-0001,Nguyễn Văn A,Kho A,"[{""name"":""Chuột Logitech MX Master 3S"",""unit"":""Chiếc"",""quantity"":20,""notes"":""Nguyên hộp""}]"';
     } else if (tab === 'SUPPLIERS') {
       filename = 'Mau_Nha_Cung_Cap.csv';
-      csvContent += 'Mã NCC,Tên nhà cung cấp,Mã số thuế,Địa chỉ,Số điện thoại,Email\nNCC-01,Công ty Cổ phần Viễn thông FPT,0101778163,Hà Nội,024-73008888,fpt@fpt.com.vn';
+      csvContent += 'tax_code,name,email\n0101778163,Công ty Cổ phần Viễn thông FPT,fpt@example.test';
     } else if (tab === 'CUSTOMERS') {
       filename = 'Mau_Khach_Hang.csv';
-      csvContent += 'Mã KH,Tên khách hàng,Số điện thoại,Địa chỉ,Email\nKH-01,Tập đoàn Công nghệ CMC,024-37958686,Hà Nội,contact@cmc.com.vn';
+      csvContent += 'code,name,phone,address,email\nKH-01,Tập đoàn Công nghệ CMC,024-37958686,Hà Nội,contact@cmc.com.vn';
     } else if (tab === 'EMPLOYEES') {
       filename = 'Mau_Nhan_Vien.csv';
-      csvContent += 'Mã NV,Họ và tên,Vai trò,Số điện thoại,Email\nNV-01,Nguyễn Văn Hùng,Kế toán trưởng,0912345678,hungnv@company.com';
+      csvContent += 'code,full_name,role,phone,email\nNV-01,Nguyễn Văn Hùng,Kế toán trưởng,0912345678,hungnv@company.com';
     } else if (tab === 'CATEGORIES') {
       filename = 'Mau_Loai_San_Pham.csv';
-      csvContent += 'Mã loại SP,Tên loại sản phẩm,Mô tả\nLSP-01,Thiết bị tin học,Máy tính linh kiện và phụ kiện CNTT';
+      csvContent += 'code,name,description\nLSP-01,Thiết bị tin học,Máy tính linh kiện và phụ kiện CNTT';
     } else {
       filename = 'Mau_San_Pham.csv';
-      csvContent += 'Mã SP,Tên sản phẩm,Mã loại SP,ĐVT,Giá nhập,Giá bán,Tồn kho\nSP-01,Màn hình Dell UltraSharp 27 Inch,LSP-01,Chiếc,8500000,9500000,15';
+      csvContent += 'code,name,category_code,unit,cost_price,selling_price,stock_qty\nSP-01,Màn hình Dell UltraSharp 27 Inch,LSP-01,Chiếc,8500000,9500000,15';
     }
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -516,7 +534,7 @@ export const MasterDataModule: React.FC<MasterDataModuleProps> = ({
     a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
-    showToast(`Đã tải mẫu Excel cho ${tab}.`);
+    showToast(`Đã tải mẫu CSV cho ${tab}.`);
   };
 
   // Import mock Excel/CSV
@@ -524,9 +542,14 @@ export const MasterDataModule: React.FC<MasterDataModuleProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      showToast(`Đã nạp thành công dữ liệu từ ${file.name}!`);
+      const importKind = activeTab === 'PO' ? 'purchase-orders' : activeTab === 'GR' ? 'goods-receipts' : activeTab === 'SUPPLIERS' ? 'suppliers' : activeTab === 'CUSTOMERS' ? 'customers' : activeTab === 'EMPLOYEES' ? 'employees' : activeTab === 'CATEGORIES' ? 'product-categories' : 'products';
+      const result = importKind === 'suppliers' || importKind === 'purchase-orders' || importKind === 'goods-receipts'
+        ? await api.importLedger(importKind, file)
+        : await api.importMasterData(importKind, file);
+      await store.syncWithBackend();
+      showToast(`Import xong: thêm ${result.created}, bỏ qua ${result.skipped} / ${result.total_rows} dòng.`);
     } catch (err: any) {
-      showToast(`Lỗi: ${err.message || err}`);
+      showToast(`Không nhập được dữ liệu: ${err.message || err}`, true);
     } finally {
       if (e.target) e.target.value = '';
     }
@@ -547,7 +570,7 @@ export const MasterDataModule: React.FC<MasterDataModuleProps> = ({
       <input
         ref={fileInputRef}
         type="file"
-        accept=".xlsx,.xls,.csv"
+        accept=".xlsx,.csv"
         className="hidden"
         onChange={handleImportFile}
       />
@@ -570,7 +593,7 @@ export const MasterDataModule: React.FC<MasterDataModuleProps> = ({
             className="cursor-pointer inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors shadow-2xs"
           >
             <Download className="h-3.5 w-3.5 text-slate-500" />
-            Tải Mẫu Excel
+            Tải Mẫu CSV
           </button>
 
           <button
@@ -578,7 +601,7 @@ export const MasterDataModule: React.FC<MasterDataModuleProps> = ({
             className="cursor-pointer inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 transition-colors shadow-2xs"
           >
             <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
-            Import Excel
+            Import CSV/XLSX
           </button>
 
           <button
@@ -589,41 +612,16 @@ export const MasterDataModule: React.FC<MasterDataModuleProps> = ({
             Thêm mới
           </button>
 
-          <button
-            onClick={() => {
-              store.loadSampleData();
-              showToast('Đã nạp bộ dữ liệu mẫu thành công!');
-            }}
-            className="cursor-pointer inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50"
-          >
-            <RefreshCw className="h-3.5 w-3.5 text-blue-500" />
-            Nạp mẫu
-          </button>
-
-          <button
-            disabled={!canManage}
-            title={!canManage ? '🔒 Chỉ Admin hoặc Kế toán trưởng được xóa danh mục' : 'Xóa toàn bộ dữ liệu danh mục'}
-            onClick={() => {
-              if (confirm('Bạn có chắc muốn xóa sạch dữ liệu danh mục?')) {
-                store.clearAllMasterData();
-                showToast('Đã xóa sạch dữ liệu danh mục!');
-              }
-            }}
-            className="cursor-pointer inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Trash2 className="h-3.5 w-3.5 text-rose-500" />
-            Xóa sạch 🔒
-          </button>
         </div>
       </div>
 
-      {successToast && (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800 flex items-center justify-between animate-fade-in">
+      {toast && (
+        <div role={toast.error ? 'alert' : 'status'} className={`rounded-xl p-3 text-xs flex items-center justify-between animate-fade-in ${toast.error ? 'border border-rose-200 bg-rose-50 text-rose-800' : 'border border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
           <div className="flex items-center gap-2">
-            <CircleCheck className="h-4 w-4 text-emerald-600 shrink-0" />
-            <span className="font-medium">{successToast}</span>
+            {toast.error ? <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0" /> : <CircleCheck className="h-4 w-4 text-emerald-600 shrink-0" />}
+            <span className="font-medium">{toast.message}</span>
           </div>
-          <button onClick={() => setSuccessToast(null)} className="font-bold text-slate-400 hover:text-slate-700">
+          <button onClick={() => setToast(null)} className="font-bold text-slate-400 hover:text-slate-700">
             ✕
           </button>
         </div>
@@ -884,7 +882,7 @@ export const MasterDataModule: React.FC<MasterDataModuleProps> = ({
             { key: 'phone', label: 'Số ĐT', render: (val) => val || '—' },
             { key: 'email', label: 'Email', render: (val) => val || '—' },
             { key: 'address', label: 'Địa chỉ', render: (val) => <span className="text-slate-600 truncate max-w-xs block">{val || '—'}</span> },
-            { key: 'legalStatus', label: 'Trạng thái', render: (val) => renderLegalStatus(val) },
+            { key: 'legalStatus', label: 'Trạng thái tra cứu MST', render: (val) => renderLegalStatus(val) },
           ]}
           onEdit={handleEdit}
           onDelete={(item) => handleDelete(item.code)}
@@ -1066,6 +1064,27 @@ export const MasterDataModule: React.FC<MasterDataModuleProps> = ({
                       <div className="w-full rounded-lg border border-slate-300 p-2 bg-slate-50 text-slate-700">
                         {editingId ? purchaseOrders.find((p) => p.code === editingId)?.createdBy || currentUser.name : currentUser.name}
                       </div>
+                    </div>
+                    <div>
+                      <label className="block font-medium text-slate-700 mb-1">Ngày đặt hàng:</label>
+                      <input
+                        required
+                        type="date"
+                        value={poForm.orderDate}
+                        onChange={(e) => setPoForm({ ...poForm, orderDate: e.target.value })}
+                        className="w-full rounded-lg border border-slate-300 p-2"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-medium text-slate-700 mb-1">Ngày giao dự kiến:</label>
+                      <input
+                        required
+                        type="date"
+                        min={poForm.orderDate || undefined}
+                        value={poForm.expectedDeliveryDate}
+                        onChange={(e) => setPoForm({ ...poForm, expectedDeliveryDate: e.target.value })}
+                        className="w-full rounded-lg border border-slate-300 p-2"
+                      />
                     </div>
                   </div>
 
@@ -1508,9 +1527,10 @@ export const MasterDataModule: React.FC<MasterDataModuleProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="cursor-pointer rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700"
+                  disabled={isSaving}
+                  className="cursor-pointer rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60"
                 >
-                  {editingId ? 'Lưu thay đổi' : 'Thêm mới'}
+                  {isSaving ? 'Đang lưu…' : editingId ? 'Lưu thay đổi' : 'Thêm mới'}
                 </button>
               </div>
             </form>

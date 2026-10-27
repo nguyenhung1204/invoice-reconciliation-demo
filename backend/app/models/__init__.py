@@ -1,4 +1,5 @@
 from app.models.entities import (
+    AccountingVoucher,
     AuditEvent,
     DatasetInvoiceItemLabel,
     GoodsReceipt,
@@ -17,7 +18,11 @@ from app.models.entities import (
     PurchaseOrder,
     PurchaseOrderItem,
     Product,
+    ProductCategory,
+    Customer,
+    Employee,
     ReconciliationFinding,
+    ReconciliationSetting,
     ReconciliationLineAllocation,
     ReconciliationRun,
     ReconciliationRunGoodsReceipt,
@@ -27,6 +32,7 @@ from app.models.entities import (
 )
 
 __all__ = [
+    "AccountingVoucher",
     "AuditEvent",
     "DatasetInvoiceItemLabel",
     "GoodsReceipt",
@@ -45,7 +51,11 @@ __all__ = [
     "PurchaseOrder",
     "PurchaseOrderItem",
     "Product",
+    "ProductCategory",
+    "Customer",
+    "Employee",
     "ReconciliationFinding",
+    "ReconciliationSetting",
     "ReconciliationLineAllocation",
     "ReconciliationRun",
     "ReconciliationRunGoodsReceipt",

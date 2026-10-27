@@ -12,8 +12,8 @@ def _number(value):
         return None
 
 
-def reconcile(invoice, purchase_order=None, goods_receipt=None, amount_tolerance=None, item_threshold=None):
-    reconciliation_settings = get_reconciliation_settings()
+def reconcile(invoice, purchase_order=None, goods_receipt=None, amount_tolerance=None, item_threshold=None, db=None):
+    reconciliation_settings = get_reconciliation_settings(db)
     amount_tolerance = reconciliation_settings["currency_tolerance"] if amount_tolerance is None else amount_tolerance
     item_threshold = reconciliation_settings["item_similarity_threshold"] if item_threshold is None else item_threshold
     warnings = []
