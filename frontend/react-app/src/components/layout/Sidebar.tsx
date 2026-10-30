@@ -173,10 +173,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </div>
               </div>
             </div>
-            <div className="mt-2 text-[10px] text-slate-400 flex items-center justify-between border-t border-slate-800/80 pt-2">
-              <span>Hệ thống:</span>
-              <span className="text-emerald-400 font-medium">Mock Frontend</span>
-            </div>
           </div>
         </div>
       </aside>

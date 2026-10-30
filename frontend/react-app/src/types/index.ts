@@ -34,6 +34,8 @@ export interface BoundingBox {
   text: string;
   confidence: number; // 0 - 100
   isAnomaly?: boolean;
+  rawBox?: [number, number, number, number];
+  page?: number;
 }
 
 export interface LineItem {

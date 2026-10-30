@@ -6,7 +6,8 @@
   "invoice": {
     "seller_tax_code": "0108075931",
     "buyer_tax_code": "5000863573",
-    "invoice_number": "1C22THT / 506572",
+    "invoice_number": "506572",
+    "invoice_series": "1C22THT",
     "invoice_date": "2022-10-09",
     "total_amount": 780000,
     "po_number": "PO-DEMO-HD001",
@@ -26,7 +27,158 @@
         "unit_price": 409091,
         "amount": 450000
       }
-    ]
+    ],
+    "ocr_confidence": 0.993,
+    "ocr_blocks": [
+      {
+        "text": "K? hi?u (Serial): 1C22THT",
+        "confidence": 0.994,
+        "box": [
+          822,
+          88,
+          1047,
+          107
+        ],
+        "page": 1,
+        "field": "invoiceSeries"
+      },
+      {
+        "text": "S?(No.): 506572",
+        "confidence": 0.996,
+        "box": [
+          822,
+          116,
+          999,
+          146
+        ],
+        "page": 1,
+        "field": "invoiceNumber"
+      },
+      {
+        "text": "Ng?y(Date) 09 th?ng(month) 10 n?m(year) 2022",
+        "confidence": 0.991,
+        "box": [
+          367,
+          154,
+          791,
+          172
+        ],
+        "page": 1,
+        "field": "issueDate"
+      },
+      {
+        "text": "??n v? b?n h?ng (Seller): C?ng ty TNHH Th??ng M?i T?ng h?p HTV",
+        "confidence": 0.995,
+        "box": [
+          270,
+          233,
+          651,
+          251
+        ],
+        "page": 1,
+        "field": "sellerName"
+      },
+      {
+        "text": "M? s? thu?(VAT code): 0 1 0 8 0 7 5 9 3 1",
+        "confidence": 0.993,
+        "box": [
+          270,
+          263,
+          414,
+          282
+        ],
+        "page": 1,
+        "field": "sellerTaxCode"
+      },
+      {
+        "text": "T?n ??n v?(Company's name): C?NG TY C? PH?N NG?N ??C",
+        "confidence": 0.989,
+        "box": [
+          324,
+          459,
+          618,
+          478
+        ],
+        "page": 1,
+        "field": "buyerName"
+      },
+      {
+        "text": "M? s? thu?(Tax code): 5000863573",
+        "confidence": 0.992,
+        "box": [
+          324,
+          490,
+          427,
+          509
+        ],
+        "page": 1,
+        "field": "buyerTaxCode"
+      },
+      {
+        "text": "CHU?T KH?NG D?Y LOGITECH M331 ?EN- IMEI: MA.260.B",
+        "confidence": 0.992,
+        "box": [
+          65,
+          720,
+          1112,
+          804
+        ],
+        "page": 1,
+        "field": "lineItem_1"
+      },
+      {
+        "text": "TAI NGHE KH?NG D?Y XIAOMI REDMI BUDS 3 LITE TR?NG- IMEI: TN.BT.13.W",
+        "confidence": 0.99,
+        "box": [
+          65,
+          812,
+          1112,
+          896
+        ],
+        "page": 1,
+        "field": "lineItem_2"
+      },
+      {
+        "text": "C?ng ti?n h?ng: 709.091",
+        "confidence": 0.995,
+        "box": [
+          705,
+          1038,
+          780,
+          1063
+        ],
+        "page": 1,
+        "field": "subTotal"
+      },
+      {
+        "text": "Ti?n thu? GTGT: 70.909",
+        "confidence": 0.995,
+        "box": [
+          895,
+          1038,
+          960,
+          1063
+        ],
+        "page": 1,
+        "field": "vatAmount"
+      },
+      {
+        "text": "T?ng ti?n thanh to?n: 780.000",
+        "confidence": 0.997,
+        "box": [
+          1038,
+          1038,
+          1115,
+          1063
+        ],
+        "page": 1,
+        "field": "grandTotal"
+      }
+    ],
+    "seller_name": "C?ng ty TNHH Th??ng M?i T?ng h?p HTV",
+    "invoice_series": "1C22THT",
+    "subtotal_amount": 709091,
+    "tax_amount": 70909
   },
   "purchase_order": {
     "po_number": "PO-DEMO-HD001",

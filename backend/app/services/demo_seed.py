@@ -228,11 +228,17 @@ def seed_public_demo(
                 po_id=purchase_order.id,
                 status="needs_review",
                 seller_tax_code=invoice_data["seller_tax_code"],
+                seller_name=invoice_data.get("seller_name", supplier_data.get("name", "")),
+                invoice_series=invoice_data.get("invoice_series", ""),
                 buyer_tax_code=invoice_data.get("buyer_tax_code", ""),
                 invoice_number=invoice_data["invoice_number"],
                 invoice_date=invoice_data["invoice_date"],
+                subtotal_amount=invoice_data.get("subtotal_amount"),
+                tax_amount=invoice_data.get("tax_amount"),
                 total_amount=invoice_data["total_amount"],
-                ocr_text="",
+                ocr_text=invoice_data.get("ocr_text", ""),
+                ocr_confidence=invoice_data.get("ocr_confidence"),
+                ocr_blocks=invoice_data.get("ocr_blocks", []),
                 warnings=[],
                 po_number=invoice_data["po_number"],
                 po_reference_text=invoice_data["po_number"],
@@ -243,9 +249,13 @@ def seed_public_demo(
             sync_invoice_items(invoice, invoice_data["items"], source="demo_seed")
             counts["invoices_created"] += 1
             counts["invoice_items_created"] += len(invoice_data["items"])
-        elif not invoice.item_rows:
-            sync_invoice_items(invoice, invoice_data["items"], source="demo_seed")
-            counts["invoice_items_created"] += len(invoice_data["items"])
+        else:
+            if not invoice.ocr_blocks and invoice_data.get("ocr_blocks"):
+                invoice.ocr_blocks = invoice_data["ocr_blocks"]
+                invoice.ocr_confidence = invoice_data.get("ocr_confidence", invoice.ocr_confidence)
+            if not invoice.item_rows:
+                sync_invoice_items(invoice, invoice_data["items"], source="demo_seed")
+                counts["invoice_items_created"] += len(invoice_data["items"])
 
         invoice_file = db.query(InvoiceFile).filter_by(sha256=checksum).first()
         if invoice_file is None:

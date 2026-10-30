@@ -304,7 +304,7 @@ async def upload_invoice(file: UploadFile = File(...), db: Session = Depends(get
         text, confidence, blocks = ocr_result["text"], ocr_result["confidence"], ocr_result.get("blocks", [])
         fields = extract_fields(text)
         ocr_fields = fields
-        for key in ("seller_tax_code", "buyer_tax_code", "invoice_number", "invoice_date", "total_amount"):
+        for key in ("seller_tax_code", "seller_name", "invoice_series", "buyer_tax_code", "invoice_number", "invoice_date", "subtotal_amount", "tax_amount", "total_amount"):
             setattr(row, key, fields[key])
         sync_invoice_items(row, fields["items"], source="ocr")
         ocr_run_status = "succeeded"
@@ -369,7 +369,7 @@ async def retry_ocr(invoice_id: int, db: Session = Depends(get_db), user: User =
         row.ocr_confidence = result["confidence"]
         fields = extract_fields(row.ocr_text)
         ocr_fields = fields
-        for key in ("seller_tax_code", "buyer_tax_code", "invoice_number", "invoice_date", "total_amount"):
+        for key in ("seller_tax_code", "seller_name", "invoice_series", "buyer_tax_code", "invoice_number", "invoice_date", "subtotal_amount", "tax_amount", "total_amount"):
             setattr(row, key, fields[key])
         sync_invoice_items(row, fields["items"], source="ocr")
         row.seller_supplier_id = db.query(Supplier.id).filter_by(tax_code=row.seller_tax_code).scalar()

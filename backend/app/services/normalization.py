@@ -47,21 +47,19 @@ def normalize_money(value: str) -> float | None:
 
 def _extract_invoice_number(header: str) -> str:
     folded = _fold_accents(header)
-    serial_match = re.search(
-        r"\bky\s+hi.{0,2}u(?:\s*\(serial\))?\s*[:：]\s*([A-Z0-9][A-Z0-9/-]*)",
-        folded,
-        re.IGNORECASE,
-    )
     number_match = re.search(
-        r"\b(?:so|s)\s*(?:\(\s*no\.?\s*\)\s*)?\.?\s*[:：]\s*([A-Z0-9][A-Z0-9/-]*)",
+        r"\b(?:so|s)\s*(?:\(\s*no\.?\s*\)\s*)?\.?\s*[:：]\s*(?:\n\s*)?([A-Z0-9][A-Z0-9/-]*)",
         folded,
         re.IGNORECASE,
     )
-    serial = serial_match.group(1).upper() if serial_match else ""
     number = number_match.group(1).upper() if number_match else ""
-    if serial and number:
-        return f"{serial} / {number}"
-    return serial or number
+    if number in {"TAI", "NHA", "SERI"}:
+        number = ""
+    if "/" in number:
+        parts = [p.strip() for p in number.split("/") if p.strip()]
+        if parts:
+            number = parts[-1]
+    return number
 
 
 def _extract_invoice_date(header: str) -> str:
@@ -102,11 +100,12 @@ def _extract_total_amount(text: str) -> float | None:
     # Match payment totals first, then bilingual/shorter total labels. OCR often
     # drops accents or a few letters, so the Vietnamese labels allow small gaps.
     label_patterns = (
-        r"tong.{0,18}tin\s+thanh\s+toan",
+        r"tong.{0,18}ti.{0,2}n\s+thanh\s+toan",
+        r"ti.{0,2}n\s+thanh\s+toan",
         r"tong\s+cong\s+tien\s+hang\s*\(\s*total\s+amount\s*\)",
-        r"cng\s+tin\s+hang\s*\(\s*total\s+amount\s*\)",
+        r"c.{0,2}ng\s+ti.{0,2}n\s+hang\s*\(\s*total\s+amount\s*\)",
         r"total\s+amount",
-        r"tong\s+cong",
+        r"tong\s+c.{0,2}ng",
     )
     matches = []
     for priority, pattern in enumerate(label_patterns):
@@ -134,15 +133,92 @@ def _extract_total_amount(text: str) -> float | None:
     return None
 
 
+
+
+def _extract_invoice_series(header: str) -> str:
+    folded = _fold_accents(header)
+    serial_match = re.search(
+        r"\bky\s+hi.{0,2}u(?:\s*\(serial\))?\s*[:?]\s*([A-Z0-9][A-Z0-9/-]*)",
+        folded,
+        re.IGNORECASE,
+    )
+    if serial_match:
+        return serial_match.group(1).upper()
+    model_match = re.search(
+        r"\bm.{0,2}u\s+s.{0,2}\s*[:?]\s*([A-Z0-9][A-Z0-9/-]*)",
+        folded,
+        re.IGNORECASE,
+    )
+    return model_match.group(1).upper() if model_match else ""
+
+
+def _extract_seller_name(text: str) -> str:
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    for idx, line in enumerate(lines[:25]):
+        folded = _fold_accents(line).lower()
+        if any(skip in folded for skip in ("nguoi mua", "khach hang", "ten don vi", "company", "ky boi")):
+            continue
+        m = re.search(r"don\s*v.?\s*ban\s*hang(?:\s*\(seller\))?\s*[:?]\s*(.+)", folded, re.IGNORECASE)
+        if m:
+            colon_idx = line.find(":")
+            val = line[colon_idx + 1 :].strip() if colon_idx != -1 else line[m.start(1) :].strip()
+            if idx + 1 < len(lines[:25]):
+                next_line = lines[idx + 1].strip()
+                next_folded = _fold_accents(next_line).lower()
+                if not any(lbl in next_folded for lbl in ("dia chi", "da chi", "ma so", "ma s", "dien thoai", "din thoi", "tai khoan", "ten khach", "ten don", "ho ten", "hoa don", "gia tri")):
+                    if len(next_line) < 45:
+                        val = f"{val} {next_line}".strip()
+            return val
+    for line in lines[:18]:
+        folded = _fold_accents(line).lower()
+        if any(skip in folded for skip in ("nguoi mua", "khach hang", "ten don vi", "company", "ky boi", "phan mem", "m-invoice", "einvoice")):
+            continue
+        if "cong ty" in folded or "chi nhanh" in folded:
+            return re.sub(r"^.*?[:?]\s*", "", line).strip()
+    return ""
+
+
+def _extract_subtotal_and_vat(text: str) -> tuple[float | None, float | None]:
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    folded_lines = [_fold_accents(line).lower() for line in lines]
+    subtotal = None
+    vat = None
+    for idx, fline in enumerate(folded_lines):
+        if subtotal is None and any(p in fline for p in ("cong tien hang", "cng tin hang", "tien hang hoa", "tin hang hoa")):
+            for cand in folded_lines[idx : idx + 6]:
+                for tok in reversed(re.findall(r"(?<![A-Z0-9])\d[\d.,]*(?![A-Z0-9])", cand, re.IGNORECASE)):
+                    val = normalize_money(tok)
+                    if val is not None and val > 100:
+                        subtotal = val
+                        break
+                if subtotal is not None:
+                    break
+        if vat is None and any(p in fline for p in ("tien thue", "tin thu")) and "thue suat" not in fline and "thu sut" not in fline:
+            for cand in folded_lines[idx : idx + 6]:
+                for tok in reversed(re.findall(r"(?<![A-Z0-9])\d[\d.,]*(?![A-Z0-9])", cand, re.IGNORECASE)):
+                    val = normalize_money(tok)
+                    if val is not None and val > 100:
+                        vat = val
+                        break
+                if vat is not None:
+                    break
+    return subtotal, vat
+
+
 def extract_fields(text: str) -> dict:
     normalized = normalize_text(text)
     header = normalized[:1800]
     tax_codes = re.findall(r"(?<!\d)(\d{10}(?:-\d{3})?)(?!\d)", normalized)
+    subtotal_amount, tax_amount = _extract_subtotal_and_vat(text)
     return {
         "seller_tax_code": normalize_tax_code(tax_codes[0]) if tax_codes else "",
+        "seller_name": _extract_seller_name(text),
+        "invoice_series": _extract_invoice_series(header),
         "buyer_tax_code": normalize_tax_code(tax_codes[1]) if len(tax_codes) > 1 else "",
         "invoice_number": _extract_invoice_number(header),
         "invoice_date": _extract_invoice_date(header),
+        "subtotal_amount": subtotal_amount,
+        "tax_amount": tax_amount,
         "total_amount": _extract_total_amount(text),
         "items": [],
     }

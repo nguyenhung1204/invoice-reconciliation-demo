@@ -10,6 +10,7 @@ from app.core.database import get_db
 from app.core.dependencies import current_user, require_roles
 from app.models import AuditEvent, GoodsReceipt, Invoice, PurchaseOrder, Supplier, User
 from app.services.procurement_lines import sync_goods_receipt_lines, sync_purchase_order_lines
+from app.services.tax_lookup import lookup_tax_code
 
 router = APIRouter(prefix="/ledger", tags=["Module 2 · PO & Ledger"])
 
@@ -102,6 +103,11 @@ def serialize_goods_receipt(row: GoodsReceipt):
         "received_by": row.received_by or "",
         "warehouse_location": row.warehouse_location or "",
     }
+
+
+@router.get("/tax-lookup/{tax_code}")
+def tax_lookup(tax_code: str, refresh: bool = False, db: Session = Depends(get_db), _: User = Depends(current_user)):
+    return lookup_tax_code(tax_code, db=db, force_live=refresh)
 
 
 @router.get("/suppliers")

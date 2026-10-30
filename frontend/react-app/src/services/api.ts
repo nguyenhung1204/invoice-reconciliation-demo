@@ -139,6 +139,19 @@ export interface InvoiceReviewInDTO {
 }
 export interface LedgerImportDTO { created: number; skipped: number; total_rows: number }
 export interface MasterDataImportDTO { created: number; skipped: number; total_rows: number }
+export interface TaxLookupDTO {
+  tax_code: string;
+  company_name: string;
+  international_name: string;
+  short_name: string;
+  address: string;
+  representative: string;
+  phone: string;
+  tax_status: 'ACTIVE' | 'WARNING_HIGH_RISK' | 'SUSPENDED' | 'UNKNOWN';
+  status_detail: string;
+  source: string;
+  looked_up_at: string;
+}
 
 const runtimeEnv = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
 export const BASE_URL = (runtimeEnv?.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
@@ -569,6 +582,12 @@ export const api = {
     const value = await request<unknown>(`/invoices/${id}/reconcile`, { method: 'POST' });
     if (!isBackendInvoice(value)) throw new ApiError('Kết quả đối soát hóa đơn không hợp lệ.');
     return value;
+  },
+
+  async lookupTaxCode(taxCode: string, refresh = false): Promise<TaxLookupDTO> {
+    const clean = encodeURIComponent(taxCode.trim());
+    const qs = refresh ? '?refresh=true' : '';
+    return request<TaxLookupDTO>(`/ledger/tax-lookup/${clean}${qs}`);
   },
 
   async listSuppliers(): Promise<SupplierDTO[]> {

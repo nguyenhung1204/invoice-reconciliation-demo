@@ -86,3 +86,20 @@ def test_ledger_rejects_po_with_unknown_supplier():
             assert db.query(PurchaseOrder).count() == 0
     finally:
         engine.dispose()
+
+
+def test_ledger_tax_lookup_returns_company_and_validates_format():
+    client, engine, _ = make_client("accountant")
+    try:
+        res_ok = client.get("/api/ledger/tax-lookup/0311609355-001")
+        assert res_ok.status_code == 200
+        body = res_ok.json()
+        assert body["tax_code"] == "0311609355-001"
+        assert body["tax_status"] == "ACTIVE"
+        assert "FPT" in body["company_name"].upper()
+
+        res_invalid = client.get("/api/ledger/tax-lookup/ABC123")
+        assert res_invalid.status_code == 200
+        assert res_invalid.json()["tax_status"] == "SUSPENDED"
+    finally:
+        engine.dispose()

@@ -19,7 +19,7 @@ import {
 import { InvoiceRecord, UserProfile } from '../../types/index.ts';
 import { InvoiceDocumentViewer } from './InvoiceDocumentViewer.tsx';
 import { formatCurrencyVND } from '../../utils/matchingEngine.ts';
-import { mockActions, store } from '../../services/api.ts';
+import { api, mockActions, store } from '../../services/api.ts';
 
 interface SplitScreenMatchingModuleProps {
   invoices: InvoiceRecord[];
@@ -67,7 +67,15 @@ export const SplitScreenMatchingModule: React.FC<SplitScreenMatchingModuleProps>
     setEditReason('');
     setLineNameDrafts({});
     setFeedbackMessage(null);
-  }, [currentInvoice?.code]);
+  }, [
+    currentInvoice?.code,
+    currentInvoice?.header?.sellerName,
+    currentInvoice?.header?.invoiceSeries,
+    currentInvoice?.header?.invoiceNumber,
+    currentInvoice?.header?.sellerTaxCode,
+    currentInvoice?.header?.issueDate,
+    currentInvoice?.header?.poCode,
+  ]);
 
   if (!currentInvoice) {
     return (
@@ -346,7 +354,7 @@ export const SplitScreenMatchingModule: React.FC<SplitScreenMatchingModuleProps>
                   value={headerForm.invoiceNumber}
                   onFocus={() => setSelectedFieldKey('invoiceNumber')}
                   onChange={(e) => handleHeaderChange('invoiceNumber', e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 font-mono font-bold text-slate-900 focus:border-blue-500 focus:outline-none"
+                  className={`w-full rounded-lg px-2.5 py-1.5 font-mono font-bold text-slate-900 focus:outline-none transition-all ${selectedFieldKey === "invoiceNumber" ? "border-2 border-amber-500 bg-amber-50/40 ring-2 ring-amber-400/40" : "border border-slate-300 focus:border-blue-500"}`}
                 />
               </div>
 
@@ -364,7 +372,7 @@ export const SplitScreenMatchingModule: React.FC<SplitScreenMatchingModuleProps>
                   value={headerForm.invoiceSeries}
                   onFocus={() => setSelectedFieldKey('invoiceSeries')}
                   onChange={(e) => handleHeaderChange('invoiceSeries', e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 font-mono text-slate-900 focus:border-blue-500 focus:outline-none"
+                  className={`w-full rounded-lg px-2.5 py-1.5 font-mono text-slate-900 focus:outline-none transition-all ${selectedFieldKey === "invoiceSeries" ? "border-2 border-amber-500 bg-amber-50/40 ring-2 ring-amber-400/40" : "border border-slate-300 focus:border-blue-500"}`}
                 />
               </div>
 
@@ -382,7 +390,7 @@ export const SplitScreenMatchingModule: React.FC<SplitScreenMatchingModuleProps>
                   value={headerForm.issueDate}
                   onFocus={() => setSelectedFieldKey('issueDate')}
                   onChange={(e) => handleHeaderChange('issueDate', e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 font-mono text-slate-900 focus:border-blue-500 focus:outline-none"
+                  className={`w-full rounded-lg px-2.5 py-1.5 font-mono text-slate-900 focus:outline-none transition-all ${selectedFieldKey === "issueDate" ? "border-2 border-amber-500 bg-amber-50/40 ring-2 ring-amber-400/40" : "border border-slate-300 focus:border-blue-500"}`}
                 />
               </div>
 
@@ -407,9 +415,44 @@ export const SplitScreenMatchingModule: React.FC<SplitScreenMatchingModuleProps>
               <div>
                 <div className="flex items-center justify-between text-slate-500 text-[11px] mb-1">
                   <label htmlFor="hdr-inv-mst">Mã số thuế Bên bán (NCC):</label>
-                  <span className="text-emerald-700 font-mono text-[10px] font-bold">
-                    10 Chữ số
-                  </span>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const mst = headerForm.sellerTaxCode.trim();
+                      if (!mst) {
+                        setFeedbackMessage({ type: 'error', text: 'Vui lòng nhập Mã số thuế để tra cứu.' });
+                        return;
+                      }
+                      try {
+                        const info = await api.lookupTaxCode(mst, true);
+                        if (info.company_name) {
+                          setHeaderForm((prev) => ({
+                            ...prev,
+                            sellerTaxCode: info.tax_code || prev.sellerTaxCode,
+                            sellerName: prev.sellerName || info.company_name,
+                          }));
+                          setFeedbackMessage({
+                            type: 'success',
+                            text: `[Tổng cục Thuế] ${info.company_name} — ${info.status_detail}`,
+                          });
+                        } else {
+                          setFeedbackMessage({
+                            type: info.tax_status === 'ACTIVE' ? 'success' : 'error',
+                            text: info.status_detail || 'Không tìm thấy thông tin MST này.',
+                          });
+                        }
+                      } catch (err: unknown) {
+                        setFeedbackMessage({
+                          type: 'error',
+                          text: err instanceof Error ? err.message : 'Lỗi khi tra cứu MST',
+                        });
+                      }
+                    }}
+                    className="cursor-pointer text-blue-600 hover:text-blue-800 font-bold text-[10px] underline"
+                    title="Tra cứu thông tin doanh nghiệp từ Tổng cục Thuế"
+                  >
+                    Tra cứu MST
+                  </button>
                 </div>
                 <input
                   id="hdr-inv-mst"
@@ -417,7 +460,7 @@ export const SplitScreenMatchingModule: React.FC<SplitScreenMatchingModuleProps>
                   value={headerForm.sellerTaxCode}
                   onFocus={() => setSelectedFieldKey('sellerTaxCode')}
                   onChange={(e) => handleHeaderChange('sellerTaxCode', e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 font-mono font-bold text-slate-900 focus:border-blue-500 focus:outline-none"
+                  className={`w-full rounded-lg px-2.5 py-1.5 font-mono font-bold text-slate-900 focus:outline-none transition-all ${selectedFieldKey === "sellerTaxCode" ? "border-2 border-amber-500 bg-amber-50/40 ring-2 ring-amber-400/40" : "border border-slate-300 focus:border-blue-500"}`}
                 />
               </div>
 
@@ -432,7 +475,7 @@ export const SplitScreenMatchingModule: React.FC<SplitScreenMatchingModuleProps>
                   value={headerForm.sellerName}
                   onFocus={() => setSelectedFieldKey('sellerName')}
                   onChange={(e) => handleHeaderChange('sellerName', e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-slate-900 focus:border-blue-500 focus:outline-none"
+                  className={`w-full rounded-lg px-2.5 py-1.5 text-slate-900 focus:outline-none transition-all ${selectedFieldKey === "sellerName" ? "border-2 border-amber-500 bg-amber-50/40 ring-2 ring-amber-400/40" : "border border-slate-300 focus:border-blue-500"}`}
                 />
               </div>
             </div>
@@ -469,102 +512,172 @@ export const SplitScreenMatchingModule: React.FC<SplitScreenMatchingModuleProps>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {currentInvoice.lineItems.map((item) => (
-                    <tr
-                      key={item.id}
-                      onClick={() => setSelectedFieldKey(`lineItem_${item.lineNo}`)}
-                      className={`cursor-pointer transition-colors ${
-                        item.isPriceMismatch || item.isQuantityMismatch || item.isMathMismatch
-                          ? 'bg-rose-50/70 hover:bg-rose-100/60'
-                          : 'hover:bg-slate-50'
-                      }`}
-                    >
-                      <td className="p-2 text-center font-bold text-slate-700">
-                        {item.lineNo}
-                      </td>
-                      <td className="p-2">
-                        {/* Tên hóa đơn OCR (cho phép sửa inline) */}
-                        <div className="text-[11px] font-medium text-slate-900">
-                          <input
-                            type="text"
-                            value={lineNameDrafts[item.lineNo] ?? item.itemNameInvoice}
-                            onChange={(e) =>
-                              handleLineItemChange(item.lineNo, e.target.value)
-                            }
-                            className="w-full rounded border border-slate-300 px-1.5 py-0.5 text-xs focus:border-blue-500 focus:outline-none"
-                            title="Sửa tên trích xuất OCR"
-                          />
-                        </div>
-                        {/* Tên chuẩn trong PO */}
-                        <div className="text-[10px] text-slate-500 mt-1 flex items-center gap-1">
-                          <span className="font-semibold text-blue-700">PO:</span> {item.itemNamePO}
-                        </div>
-                      </td>
+                  {currentInvoice.lineItems.map((item) => {
+                    const isRowSelected =
+                      selectedFieldKey === `lineItem_${item.lineNo}` ||
+                      selectedFieldKey?.startsWith(`lineItem_${item.lineNo}_`);
 
-                      {/* Fuzzy Levenshtein Score */}
-                      <td className="p-2 text-center">
-                        <span
-                          className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                            item.fuzzyScore >= 90
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : item.fuzzyScore >= 80
-                              ? 'bg-amber-100 text-amber-800'
-                              : 'bg-rose-100 text-rose-800'
+                    return (
+                      <tr
+                        key={item.id}
+                        onClick={() =>
+                          setSelectedFieldKey(
+                            selectedFieldKey === `lineItem_${item.lineNo}`
+                              ? null
+                              : `lineItem_${item.lineNo}`
+                          )
+                        }
+                        className={`cursor-pointer transition-colors ${
+                          isRowSelected
+                            ? 'bg-amber-50/80 ring-2 ring-inset ring-amber-400'
+                            : item.isPriceMismatch || item.isQuantityMismatch || item.isMathMismatch
+                            ? 'bg-rose-50/70 hover:bg-rose-100/60'
+                            : 'hover:bg-slate-50'
+                        }`}
+                      >
+                        <td className="p-2 text-center font-bold text-slate-700">
+                          {item.lineNo}
+                        </td>
+                        <td
+                          className={`p-2 transition-all ${
+                            selectedFieldKey === `lineItem_${item.lineNo}` || selectedFieldKey === `lineItem_${item.lineNo}_name`
+                              ? 'bg-amber-100/60 ring-1 ring-amber-400 rounded'
+                              : ''
                           }`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedFieldKey(
+                              selectedFieldKey === `lineItem_${item.lineNo}`
+                                ? null
+                                : `lineItem_${item.lineNo}`
+                            );
+                          }}
                         >
-                          {item.fuzzyScore}%
-                        </span>
-                      </td>
+                          {/* Tên hóa đơn OCR (cho phép sửa inline) */}
+                          <div className="text-[11px] font-medium text-slate-900">
+                            <input
+                              type="text"
+                              value={lineNameDrafts[item.lineNo] ?? item.itemNameInvoice}
+                              onChange={(e) =>
+                                handleLineItemChange(item.lineNo, e.target.value)
+                              }
+                              className="w-full rounded border border-slate-300 px-1.5 py-0.5 text-xs focus:border-blue-500 focus:outline-none"
+                              title="Sửa tên trích xuất OCR"
+                            />
+                          </div>
+                          {/* Tên chuẩn trong PO */}
+                          <div className="text-[10px] text-slate-500 mt-1 flex items-center gap-1">
+                            <span className="font-semibold text-blue-700">PO:</span> {item.itemNamePO}
+                          </div>
+                        </td>
 
-                      {/* Đối chiếu Số lượng 3 bên (HĐ - PO - GR) */}
-                      <td className="p-2 text-center">
-                        <div
-                          className={`inline-flex items-center gap-1 font-mono font-bold px-1.5 py-0.5 rounded ${
-                            item.isQuantityMismatch
-                              ? 'bg-rose-200 text-rose-900 ring-1 ring-rose-400'
-                              : 'text-slate-800'
-                          }`}
-                        >
-                          <span>{item.quantityInvoice}</span>
-                          <span className="text-slate-400">|</span>
-                          <span className="text-blue-700">{item.quantityPO}</span>
-                          <span className="text-slate-400">|</span>
-                          <span className="text-emerald-700">{item.quantityGR}</span>
-                        </div>
-                        <div className="text-[9px] text-slate-400 mt-0.5">{item.unit}</div>
-                      </td>
+                        {/* Fuzzy Levenshtein Score */}
+                        <td className="p-2 text-center">
+                          <span
+                            className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                              item.fuzzyScore >= 90
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : item.fuzzyScore >= 80
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-rose-100 text-rose-800'
+                            }`}
+                          >
+                            {item.fuzzyScore}%
+                          </span>
+                        </td>
 
-                      {/* Đối chiếu Đơn giá (HĐ vs PO) */}
-                      <td className="p-2 text-right">
-                        <div
-                          className={`font-mono font-bold ${
-                            item.isPriceMismatch
-                              ? 'text-rose-700 bg-rose-100 px-1 rounded inline-block'
-                              : 'text-slate-900'
-                          }`}
-                        >
-                          {formatCurrencyVND(item.unitPriceInvoice).replace(' đ', '')}
-                        </div>
-                        <div className="text-[10px] text-blue-700 font-mono">
-                          PO: {formatCurrencyVND(item.unitPricePO).replace(' đ', '')}
-                        </div>
-                      </td>
+                        {/* Đối chiếu Số lượng 3 bên (HĐ - PO - GR) */}
+                        <td className="p-2 text-center">
+                          <div
+                            className={`inline-flex items-center gap-1 font-mono font-bold px-1.5 py-0.5 rounded ${
+                              item.isQuantityMismatch
+                                ? 'bg-rose-200 text-rose-900 ring-1 ring-rose-400'
+                                : 'text-slate-800'
+                            }`}
+                          >
+                            <span>{item.quantityInvoice}</span>
+                            <span className="text-slate-400">|</span>
+                            <span className="text-blue-700">{item.quantityPO}</span>
+                            <span className="text-slate-400">|</span>
+                            <span className="text-emerald-700">{item.quantityGR}</span>
+                          </div>
+                          <div className="text-[9px] text-slate-400 mt-0.5">{item.unit}</div>
+                        </td>
 
-                      {/* Thành tiền & Kiểm tra nhân chéo */}
-                      <td className="p-2 text-right">
-                        <div
-                          className={`font-mono font-bold ${
-                            item.isMathMismatch ? 'text-rose-700 underline' : 'text-slate-900'
+                        {/* Đối chiếu Đơn giá (HĐ vs PO) */}
+                        <td
+                          className={`p-2 text-right transition-all cursor-pointer ${
+                            selectedFieldKey === `lineItem_${item.lineNo}_price`
+                              ? 'bg-amber-200/80 ring-2 ring-inset ring-amber-500 rounded font-bold'
+                              : 'hover:bg-amber-50/50'
                           }`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedFieldKey(
+                              selectedFieldKey === `lineItem_${item.lineNo}_price`
+                                ? null
+                                : `lineItem_${item.lineNo}_price`
+                            );
+                          }}
                         >
-                          {formatCurrencyVND(item.amountInvoice)}
-                        </div>
-                        <div className="text-[10px] text-slate-400">
-                          Thuế: {item.vatRate}%
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                          <div
+                            className={`font-mono font-bold ${
+                              item.isPriceMismatch
+                                ? 'text-rose-700 bg-rose-100 px-1 rounded inline-block'
+                                : 'text-slate-900'
+                            }`}
+                          >
+                            {formatCurrencyVND(item.unitPriceInvoice).replace(' đ', '')}
+                          </div>
+                          <div className="text-[10px] text-blue-700 font-mono">
+                            PO: {formatCurrencyVND(item.unitPricePO).replace(' đ', '')}
+                          </div>
+                        </td>
+
+                        {/* Thành tiền & Thuế */}
+                        <td
+                          className={`p-2 text-right transition-all cursor-pointer ${
+                            selectedFieldKey === `lineItem_${item.lineNo}_amount`
+                              ? 'bg-amber-200/80 ring-2 ring-inset ring-amber-500 rounded font-bold'
+                              : 'hover:bg-amber-50/50'
+                          }`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedFieldKey(
+                              selectedFieldKey === `lineItem_${item.lineNo}_amount`
+                                ? null
+                                : `lineItem_${item.lineNo}_amount`
+                            );
+                          }}
+                        >
+                          <div
+                            className={`font-mono font-bold ${
+                              item.isMathMismatch ? 'text-rose-700 underline' : 'text-slate-900'
+                            }`}
+                          >
+                            {formatCurrencyVND(item.amountInvoice)}
+                          </div>
+                          <div
+                            className={`text-[10px] mt-0.5 inline-block px-1.5 py-0.5 rounded transition-all cursor-pointer ${
+                              selectedFieldKey === `lineItem_${item.lineNo}_vat`
+                                ? 'bg-amber-300 text-amber-950 font-bold ring-2 ring-amber-500'
+                                : 'text-slate-500 bg-slate-100 hover:bg-slate-200'
+                            }`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedFieldKey(
+                                selectedFieldKey === `lineItem_${item.lineNo}_vat`
+                                  ? null
+                                  : `lineItem_${item.lineNo}_vat`
+                              );
+                            }}
+                          >
+                            Thuế: {item.vatRate != null ? `${item.vatRate}%` : 'Chưa có'}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -582,21 +695,42 @@ export const SplitScreenMatchingModule: React.FC<SplitScreenMatchingModuleProps>
             </div>
 
             <div className="grid grid-cols-3 gap-3 text-xs">
-              <div className="rounded-lg bg-slate-50 p-2.5 border border-slate-200">
+              <div
+                onClick={() => setSelectedFieldKey('subTotal')}
+                className={`rounded-lg p-2.5 cursor-pointer transition-all ${
+                  selectedFieldKey === 'subTotal'
+                    ? 'border-2 border-amber-500 bg-amber-50/50 ring-2 ring-amber-400/40'
+                    : 'bg-slate-50 border border-slate-200 hover:border-blue-300'
+                }`}
+              >
                 <div className="text-slate-500 text-[11px]">Tiền hàng (Subtotal):</div>
                 <div className="font-mono font-bold text-slate-900 mt-0.5 text-sm">
                   {formatCurrencyVND(currentInvoice.header.subTotal)}
                 </div>
               </div>
 
-              <div className="rounded-lg bg-slate-50 p-2.5 border border-slate-200">
+              <div
+                onClick={() => setSelectedFieldKey('vatAmount')}
+                className={`rounded-lg p-2.5 cursor-pointer transition-all ${
+                  selectedFieldKey === 'vatAmount'
+                    ? 'border-2 border-amber-500 bg-amber-50/50 ring-2 ring-amber-400/40'
+                    : 'bg-slate-50 border border-slate-200 hover:border-blue-300'
+                }`}
+              >
                 <div className="text-slate-500 text-[11px]">Tiền thuế GTGT:</div>
                 <div className="font-mono font-bold text-slate-900 mt-0.5 text-sm">
                   {formatCurrencyVND(currentInvoice.header.vatAmount)}
                 </div>
               </div>
 
-              <div className="rounded-lg bg-blue-50/70 p-2.5 border border-blue-200">
+              <div
+                onClick={() => setSelectedFieldKey('grandTotal')}
+                className={`rounded-lg p-2.5 cursor-pointer transition-all ${
+                  selectedFieldKey === 'grandTotal'
+                    ? 'border-2 border-amber-500 bg-amber-50/50 ring-2 ring-amber-400/40'
+                    : 'bg-blue-50/70 border border-blue-200 hover:border-blue-400'
+                }`}
+              >
                 <div className="text-blue-700 text-[11px] font-semibold">Tổng thanh toán HĐ:</div>
                 <div className="font-mono font-bold text-blue-900 mt-0.5 text-sm">
                   {formatCurrencyVND(currentInvoice.header.grandTotal)}

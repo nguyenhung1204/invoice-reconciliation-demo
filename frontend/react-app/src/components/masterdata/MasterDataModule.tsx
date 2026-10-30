@@ -717,9 +717,8 @@ export const MasterDataModule: React.FC<MasterDataModuleProps> = ({
                             <div className="text-[10px] text-purple-600">↳ Bổ sung: {po.parentPoCode}</div>
                           )}
                         </td>
-                        <td className="py-3 px-3 max-w-[200px]">
-                          <div className="font-semibold text-slate-900 truncate">{po.supplierName}</div>
-                          <div className="text-[10px] text-slate-500 font-mono">MST: {po.supplierTaxCode}</div>
+                        <td className="py-3 px-3 max-w-[220px]">
+                          <div className="font-semibold text-slate-900 truncate" title={po.supplierName}>{po.supplierName}</div>
                         </td>
                         <td className="py-3 px-3 font-mono text-slate-600">{po.orderDate}</td>
                         <td className="py-3 px-3 text-slate-700">{po.createdBy}</td>
@@ -882,7 +881,39 @@ export const MasterDataModule: React.FC<MasterDataModuleProps> = ({
             { key: 'phone', label: 'Số ĐT', render: (val) => val || '—' },
             { key: 'email', label: 'Email', render: (val) => val || '—' },
             { key: 'address', label: 'Địa chỉ', render: (val) => <span className="text-slate-600 truncate max-w-xs block">{val || '—'}</span> },
-            { key: 'legalStatus', label: 'Trạng thái tra cứu MST', render: (val) => renderLegalStatus(val) },
+            {
+              key: 'legalStatus',
+              label: 'Trạng thái tra cứu MST',
+              render: (val, row) => (
+                <div className="flex items-center gap-2">
+                  {renderLegalStatus(val)}
+                  {row.taxCode && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const res = await api.lookupTaxCode(row.taxCode, true);
+                          if (res.company_name) {
+                            showToast(
+                              `[Tổng cục Thuế] MST ${res.tax_code}: ${res.company_name} — ${res.status_detail}${res.address ? ` (${res.address})` : ''}`,
+                              res.tax_status !== 'ACTIVE'
+                            );
+                          } else {
+                            showToast(res.status_detail || 'Không tìm thấy thông tin MST', true);
+                          }
+                        } catch (err: unknown) {
+                          showToast(err instanceof Error ? err.message : 'Lỗi tra cứu MST', true);
+                        }
+                      }}
+                      className="cursor-pointer rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 hover:bg-blue-100"
+                      title="Tra cứu trực tuyến từ dữ liệu Tổng cục Thuế"
+                    >
+                      Tra cứu
+                    </button>
+                  )}
+                </div>
+              ),
+            },
           ]}
           onEdit={handleEdit}
           onDelete={(item) => handleDelete(item.code)}
@@ -1248,11 +1279,44 @@ export const MasterDataModule: React.FC<MasterDataModuleProps> = ({
                       />
                     </div>
                     <div>
-                      <label className="block font-medium mb-1">Mã số thuế:</label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="font-medium">Mã số thuế:</label>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const mst = supplierForm.taxCode.trim();
+                            if (!mst) {
+                              showToast('Vui lòng nhập Mã số thuế trước khi tra cứu.', true);
+                              return;
+                            }
+                            try {
+                              const info = await api.lookupTaxCode(mst, true);
+                              if (info.company_name) {
+                                setSupplierForm((prev) => ({
+                                  ...prev,
+                                  taxCode: info.tax_code || prev.taxCode,
+                                  name: info.company_name || prev.name,
+                                  address: info.address || prev.address,
+                                  phone: info.phone || prev.phone,
+                                }));
+                                showToast(`Đã tự động điền thông tin từ Tổng cục Thuế: ${info.company_name}`);
+                              } else {
+                                showToast(info.status_detail || 'Không tìm thấy thông tin MST này.', true);
+                              }
+                            } catch (err: unknown) {
+                              showToast(err instanceof Error ? err.message : 'Lỗi khi tra cứu MST', true);
+                            }
+                          }}
+                          className="cursor-pointer text-[10px] font-bold text-blue-600 hover:text-blue-800 underline"
+                        >
+                          Tra cứu & Tự điền
+                        </button>
+                      </div>
                       <input
                         required
                         value={supplierForm.taxCode}
                         onChange={(e) => setSupplierForm({ ...supplierForm, taxCode: e.target.value })}
+                        placeholder="Nhập MST (10 hoặc 13 số)..."
                         className="w-full rounded-lg border border-slate-300 p-2 font-mono"
                       />
                     </div>

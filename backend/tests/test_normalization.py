@@ -44,7 +44,8 @@ Mã nhân hóa đơn: 4427393900446845"""
 
         fields = extract_fields(text)
 
-        self.assertEqual(fields["invoice_number"], "1K23THN / 00446845")
+        self.assertEqual(fields["invoice_series"], "1K23THN")
+        self.assertEqual(fields["invoice_number"], "00446845")
         self.assertEqual(fields["invoice_date"], "2023-04-16")
         self.assertEqual(fields["total_amount"], 29350000)
         self.assertEqual(fields["seller_tax_code"], "0311609355-001")
@@ -62,7 +63,8 @@ S tin vit bng ch (Amount in words): By trăm tám mưoi nghìn đng"""
 
         fields = extract_fields(text)
 
-        self.assertEqual(fields["invoice_number"], "1C22THT / 506572")
+        self.assertEqual(fields["invoice_series"], "1C22THT")
+        self.assertEqual(fields["invoice_number"], "506572")
         self.assertEqual(fields["invoice_date"], "2022-10-09")
         self.assertEqual(fields["total_amount"], 780000)
 
